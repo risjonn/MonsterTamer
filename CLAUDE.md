@@ -67,27 +67,36 @@ Constants:          PascalCase      e.g. const int MaxSlots = 6
 
 # CURRENT TASK
 
-### 5.6 Move animations
 
-- [ ] Implement an animation system — a simple list of active `BattleAnimation` objects updated each frame
-- [ ] **Attack move animation:**
-  - Flash the target monster's position with a brief white/red overlay (3–5 frames)
-  - Show a floating damage number that rises and fades out over ~40 frames
-  - e.g. "-64" in red floating above the enemy sprite
-- [ ] **Heal move animation:**
-  - Flash the caster's position with a green overlay
-  - Show a floating heal number in green e.g. "+30 HP"
-  - Add small rising green particles (3–4 circles moving upward and fading)
-- [ ] **Status move animation:**
-  - Show swirling coloured circles around the target (colour matches status: yellow=paralysed, orange=burned, blue=frozen, purple=poisoned)
-  - Display the status name as a floating text label e.g. "PARALYSED!" in the status colour
-- [ ] **Capture orb animation:**
-  - Draw a circle (orb) that travels from the player side toward the enemy
-  - Orb expands on contact, then shows the result: "Caught!" in gold or "Escaped!" in red
-- [ ] **Potion animation:**
-  - Green glow around the target monster
-  - Floating "+X HP" number in green
-- [ ] All animations must be non-blocking — game loop continues, animations play over a fixed number of frames (use a frame counter, not Thread.Sleep)
+### 5.6 Status condition logic fix
+
+- [ ] **Paralysed**:
+  - 50% chance to skip the turn entirely
+  - Show "X is paralysed and cannot move!"
+  - Do not execute the selected move if the turn is skipped
+- [ ] **Frozen**:
+  - Always skip the next turn
+  - Show "X is frozen solid!"
+  - Clear the status after the skipped turn
+- [ ] **Burned**:
+  - Deal 10% max HP damage at the start of the turn
+  - Reduce attack power by 25%
+  - Show "X is hurt by its burn!"
+- [ ] **Poisoned**:
+  - Deal 8% max HP damage at the start of the turn
+  - Show "X is hurt by poison!"
+- [ ] Apply status effects before the monster acts
+- [ ] Ensure skipped turns do not execute moves
+- [ ] Improve battle log readability:
+  - Add visual separation between status events and move execution
+  - Clearly distinguish skipped turns from normal actions
+- [ ] Verify status effects work correctly for both player and enemy monsters
+- [ ] Prepare hooks/events for future battle animations (Priority 5.7):
+  - StatusApplied
+  - StatusDamage
+  - TurnSkipped
+  - StatusRemoved
+
 
 # Architecture References
 
