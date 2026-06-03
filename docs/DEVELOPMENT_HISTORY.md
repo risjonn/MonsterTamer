@@ -268,6 +268,19 @@ Goal:
   - Preserve existing functionality and animations
 
 
+### 5.7a Battle animation framework & attack animations
+
+- [x] New `BattleAnimation` abstract class in `src/BattleAnimation.cs` — `_frame`, `_duration`, `IsComplete`, concrete `Update()`, abstract `Draw()`
+- [x] `HitFlashAnimation` — 5-frame white-then-red semi-transparent circle over target sprite centre; fades with each frame
+- [x] `DamageNumberAnimation` — 40-frame floating "-N" damage number in red; rises 55px and shrinks/fades as `t → 1`
+- [x] `BattleManager.AttackHit` event — fires `(Monster target, int damage)` using HP delta around `Execute()`, never parsing result strings
+- [x] `GameManager` subscribes to `AttackHit` in `StartWildBattle`, `StartTrainerBattle`, `StartBossBattle`
+- [x] `OnAttackHit()` resolves target side (player vs enemy) by reference equality against `EnemyMonster`; uses sprite centre coordinates (enemy: 845,168; player: 272,312)
+- [x] Animation list pruned in `Update()` each frame (reverse-iterate, remove `IsComplete`); drawn in `DrawBattle()` after sprites, before UI panels
+- [x] `ResetBattleAnimState()` clears animation list on battle start
+- [x] All animations are non-blocking — no `Thread.Sleep`, only frame counters
+- [x] Reuse hooks ready for 5.7b: `StatusApplied`, `StatusDamage`, `TurnSkipped`, `StatusRemoved` events already wired in `BattleManager`
+
 ### 5.6 Status condition logic fix
 
 - [x] **Paralysed**:

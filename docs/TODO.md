@@ -1,33 +1,6 @@
 # TODO tasks
 
 
-### 5.7a Battle animation framework & attack animations
-
-- [ ] Implement a lightweight battle animation system:
-  - Maintain a list of active BattleAnimation objects
-  - Update animations each frame
-  - Draw animations each frame
-  - Automatically remove completed animations
-  - Keep implementation simple and reusable
-  - Avoid introducing unnecessary abstraction
-- [ ] **Attack move animation:**:
-  - Flash target monster with brief white/red overlay (3–5 frames)
-  - Floating damage number rises upward and fades out (~40 frames)
-  - Example: "-64" displayed in red
-  - Works for both player and enemy attacks
-- All animations must:
-  - Be non-blocking
-  - Use frame counters only
-  - Never use Thread.Sleep
-  - Continue updating while the game loop runs normally
-- Prepare reusable hooks for future animation types:
-  - Heal
-  - Status
-  - Capture
-  - Potion
-  - Turn skip
-
-
 ### 5.7b Heal, status & turn-skip animations
 
 - [ ] Heal move animation:

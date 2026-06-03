@@ -35,6 +35,13 @@ namespace MonsterTamer
         // Sprite cache — loaded once in Run(), keyed by monster name
         private Dictionary<string, Bitmap> _monsterSprites = new();
 
+        // Active battle animations — updated and drawn each frame, pruned when complete
+        private List<BattleAnimation> _battleAnimations = new();
+
+        // Inter-turn pacing — after player acts, enemy fires after _interTurnDelay frames
+        private bool _pendingEnemyTurn = false;
+        private int  _interTurnDelay   = 0;
+
         // Screen resolution constants — reference everywhere instead of hardcoded 800/600
         private const int ScreenW = 1280;
         private const int ScreenH = 720;
@@ -252,6 +259,8 @@ namespace MonsterTamer
                 return;
             }
 
+            if (_pendingEnemyTurn) return;
+
             if (_showingSwapMenu)
             {
                 HandleSwapInput();
@@ -282,10 +291,13 @@ namespace MonsterTamer
                 if (SplashKit.KeyTyped(KeyCode.ReturnKey))
                 {
                     _battleManager.PlayerTurn(_player.SelectedMoveIndex);
-                    if (!_battleManager.IsBattleOver())
-                        _battleManager.EnemyTurn();
                     if (_battleManager.IsBattleOver())
                         ShowBattleResult();
+                    else
+                    {
+                        _pendingEnemyTurn = true;
+                        _interTurnDelay   = 150;
+                    }
                 }
             }
         }
@@ -343,11 +355,14 @@ namespace MonsterTamer
                     }
                 }
 
-                // Item used — enemy takes their turn
-                if (!_battleManager.IsBattleOver())
-                    _battleManager.EnemyTurn();
+                // Item used — defer enemy turn so animations play first
                 if (_battleManager.IsBattleOver())
                     ShowBattleResult();
+                else
+                {
+                    _pendingEnemyTurn = true;
+                    _interTurnDelay   = 150;
+                }
             }
         }
 
@@ -378,11 +393,14 @@ namespace MonsterTamer
                     _player.Party.SwapToFront(_selectedSwapIndex);
                     _playerHpDisplay = _player.GetActiveMonster()?.HpPercent ?? 1.0f;
                     _battleManager.AddLog($"Go, {selected.Name}!");
-                    // Swapping uses the player's turn
-                    if (!_battleManager.IsBattleOver())
-                        _battleManager.EnemyTurn();
+                    // Swapping uses the player's turn — defer enemy turn
                     if (_battleManager.IsBattleOver())
                         ShowBattleResult();
+                    else
+                    {
+                        _pendingEnemyTurn = true;
+                        _interTurnDelay   = 150;
+                    }
                 }
                 _showingSwapMenu = false;
             }
@@ -393,6 +411,29 @@ namespace MonsterTamer
             if (_state == GameState.Battle && _battleManager != null)
             {
                 if (_battleAnimFrame < 30) _battleAnimFrame++;
+
+                // Update animations; prune completed ones (iterate in reverse for safe removal)
+                for (int i = _battleAnimations.Count - 1; i >= 0; i--)
+                {
+                    if (_battleAnimations[i].IsComplete)
+                        _battleAnimations.RemoveAt(i);
+                    else
+                        _battleAnimations[i].Update();
+                }
+
+                // Inter-turn pacing: count down then fire enemy turn
+                if (_pendingEnemyTurn)
+                {
+                    if (_interTurnDelay > 0)
+                        _interTurnDelay--;
+                    else
+                    {
+                        _pendingEnemyTurn = false;
+                        _battleManager.EnemyTurn();
+                        if (_battleManager.IsBattleOver())
+                            ShowBattleResult();
+                    }
+                }
 
                 TamedMonster? pm = _player.GetActiveMonster();
                 Monster?      em = _battleManager.EnemyMonster;
@@ -475,6 +516,7 @@ namespace MonsterTamer
             AITrainer dummy     = new AITrainer("Wild");
             _battleManager      = new BattleManager(_player, dummy);
             _battleManager.WildTarget = wild;
+            _battleManager.AttackHit += OnAttackHit;
             _battleManager.AddLog($"A wild {wild.Name} appeared!");
             _battleManager.AddLog($"{wild.GetBattleCry()}");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
@@ -485,6 +527,7 @@ namespace MonsterTamer
         private void StartTrainerBattle(AITrainer trainer)
         {
             _battleManager = new BattleManager(_player, trainer);
+            _battleManager.AttackHit += OnAttackHit;
             _battleManager.AddLog($"Trainer {trainer.Name} wants to battle!");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
             ResetBattleAnimState();
@@ -512,6 +555,7 @@ namespace MonsterTamer
             AITrainer   bossTrainer = new AITrainer("Naga Belian", 3);
             _battleManager = new BattleManager(_player, bossTrainer);
             _battleManager.BossTarget = nagaBelian;
+            _battleManager.AttackHit += OnAttackHit;
             _battleManager.AddLog("NAGA BELIAN EMERGES FROM THE DEPTHS!");
             _battleManager.AddLog(nagaBelian.GetBattleCry());
             ResetBattleAnimState();
@@ -559,6 +603,21 @@ namespace MonsterTamer
             _pendingBattleEnd    = false;
             _battleResultTimer   = 0;
             _battleResultMessage = "";
+            _battleAnimations.Clear();
+            _pendingEnemyTurn    = false;
+            _interTurnDelay      = 0;
+        }
+
+        // Fired by BattleManager.AttackHit — creates a hit flash + floating damage number
+        // at the target's sprite position.  Player monster is on the left (272, 312);
+        // enemy is on the right (845, 168).  These match the DrawBattle() DrawMonsterSprite calls.
+        private void OnAttackHit(Monster target, int damage)
+        {
+            bool  isEnemy = (target == _battleManager?.EnemyMonster);
+            float cx      = isEnemy ? 845f : 272f;
+            float cy      = isEnemy ? 168f : 312f;
+            _battleAnimations.Add(new HitFlashAnimation(cx, cy));
+            _battleAnimations.Add(new DamageNumberAnimation(cx, cy - 30f, damage));
         }
 
         private void ShowBattleResult()
@@ -954,6 +1013,10 @@ namespace MonsterTamer
                 DrawMonsterSprite(enemyMon.Name, 845 + enemyOffX, 168, false);
             if (playerMon != null)
                 DrawMonsterSprite(playerMon.Name, 272 + plyrOffX, 312, true);
+
+            // Draw active battle animations (hit flash, damage numbers) above sprites, below UI
+            foreach (BattleAnimation anim in _battleAnimations)
+                anim.Draw();
 
             // Battle log first so info panels render on top of it
             DrawBattleLog();

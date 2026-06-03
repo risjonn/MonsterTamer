@@ -14,7 +14,8 @@ namespace MonsterTamer
         private BossMonster?   _bossTarget;  // set if battling the final boss
         private string         _lastPlayerMonsterName = "";
 
-        // Hooks for future animation system (Priority 5.7)
+        // Animation hooks — subscribe in GameManager to create BattleAnimation instances
+        public event Action<Monster, int>?                  AttackHit;      // target, damage dealt
         public event Action<Monster, StatusCondition>?      StatusApplied;
         public event Action<Monster, StatusCondition, int>? StatusDamage;
         public event Action<Monster>?                       TurnSkipped;
@@ -97,7 +98,10 @@ namespace MonsterTamer
 
             StatusCondition defenderStatusBefore = defender.Status;
             Move   selectedMove = attacker.MoveSet[moveIndex];
+            int    hpBefore     = defender.Hp;
             string result       = selectedMove.Execute(attacker, defender);
+            int    damageDealt  = Math.Max(0, hpBefore - defender.Hp);
+            if (damageDealt > 0) AttackHit?.Invoke(defender, damageDealt);
             _battleLog.Add(result);
             if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
                 StatusApplied?.Invoke(defender, defender.Status);
@@ -182,7 +186,10 @@ namespace MonsterTamer
             if (hadStatusDamage) _battleLog.Add("──");
 
             StatusCondition defenderStatusBefore = defender.Status;
-            string result = moveset[moveIndex].Execute(attacker, defender);
+            int    hpBefore    = defender.Hp;
+            string result      = moveset[moveIndex].Execute(attacker, defender);
+            int    damageDealt = Math.Max(0, hpBefore - defender.Hp);
+            if (damageDealt > 0) AttackHit?.Invoke(defender, damageDealt);
             _battleLog.Add(result);
             if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
                 StatusApplied?.Invoke(defender, defender.Status);
