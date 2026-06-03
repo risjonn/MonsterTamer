@@ -37,6 +37,15 @@ namespace MonsterTamer
             return null;
         }
 
+        public bool SwapToFront(int index)
+        {
+            if (index <= 0 || index >= _monsters.Count) return false;
+            TamedMonster selected = _monsters[index];
+            _monsters.RemoveAt(index);
+            _monsters.Insert(0, selected);
+            return true;
+        }
+
         public bool IsWiped()
         {
             foreach (TamedMonster m in _monsters)

@@ -1,0 +1,267 @@
+# CODEBASE CHECKPOINT
+
+Current version: **v4** (as of 2026-06-02 session — Priorities 1–5.2 complete)
+
+## File summaries
+
+### Program.cs
+
+Entry point. Calls `GameManager.GetInstance().Run()`. Nothing else.
+
+### Enumerations.cs
+
+All 7 enums in one file: `MonsterType`, `GameState`, `TrainerAction`, `StatusCondition`, `CaptureResult`, `ItemRarity`, `BattleResult`.
+
+### Monster.cs
+
+Abstract base class. All fields private. `TakeDamage()`, `RestoreHp()`, `LevelUp()`, `ApplyStatusEffect()` are concrete. `GetBattleCry()` and `GetDescription()` are abstract.
+
+### ConcreteMonsters.cs
+
+Three child classes in one file: `TamedMonster`, `WildMonster`, `BossMonster`. Each overrides both abstract methods. `BossMonster.GetBattleCry()` returns different text per phase.
+
+### Move.cs
+
+Abstract base class. `Execute()` and `GetMoveCategory()` are abstract.
+
+### ConcreteMoves.cs
+
+Three child classes: `AttackMove` (uses TypeChart), `HealMove` (calls RestoreHp), `StatusMove` (sets Status condition). All override Execute() and GetMoveCategory().
+
+### Item.cs
+
+Abstract base class. `Use()` and `GetDescription()` are abstract.
+
+### ConcreteItems.cs
+
+Three child classes: `CaptureOrb` (has AttemptCapture() with probability formula), `Potion` (calls RestoreHp), `StatusCure` (clears status). All override Use() and GetDescription().
+
+### Trainer.cs
+
+Abstract base class. Owns a `Party` and `Inventory`. `ChooseAction()` is abstract — Strategy Pattern interface.
+
+### ConcreteTrainers.cs
+
+`PlayerTrainer` — manages `SelectedMoveIndex` with clamping. `AITrainer` — loops through MoveSet using TypeChart to find best move. Both override `ChooseAction()`.
+
+### TypeChart.cs
+
+Static class. 8×8 `float[,]` lookup table. `GetMultiplier(attackType, defendType)` returns multiplier.
+
+### BattleState.cs
+
+Plain data class — snapshot of current battle (player monster, enemy monster, turn number, whose turn). Passed to `ChooseAction()`.
+
+### Party.cs
+
+Manages `List<TamedMonster>` capped at 6. Has indexer, `GetActiveMonster()`, `IsWiped()`.
+
+### Inventory.cs
+
+Manages `List<Item>` with configurable max slots. Has indexer, `AddItem()`, `RemoveItem()`, `GetAllItems()`.
+
+### MonsterFactory.cs
+
+Static Factory class. One static method per monster. Each method creates a fully-initialised monster with all moves pre-assigned. `CreateNagaBelian()` creates a `BossMonster`.
+
+### Region.cs
+
+Holds encounter table (`List<WildMonster>`) and trainer roster (`List<AITrainer>`). `GetRandomEncounter()` returns a fresh monster instance via MonsterFactory. `GetNextTrainer()` returns first non-wiped trainer.
+
+### BattleManager.cs
+
+Runs one battle. `PlayerTurn()` validates move index, applies status, calls `Execute()`. `EnemyTurn()` calls `ChooseAction()` then `Execute()`. `IsBattleOver()` checks both sides, sets `BattleResult`, awards XP on win.
+
+### OverworldMap.cs
+
+Contains: `TileType` enum, `Tile` class, `OverworldPlayer` class (position + animation), `TrainerNPC` class, `OverworldMap` class (tile grid + camera + collision + encounter triggers), `MapFactory` static class (3 hand-designed maps).
+
+Movement: arrow keys and WASD. **15% chance per new tile entered** in tall grass (was 4% per frame). Trainer trigger on proximity. Region-cleared HUD badge and pulsing EXIT tile. Fade-to-black transition on EXIT. Player spawns at region-specific tile (Rainforest: 4,2; Delta/Highlands: 2,2). Camera now **centres the 800×640 map** within the 1280×720 window using negative cam offsets. `ScreenW = 1280`, `ScreenH = 720` constants defined at top of file. Fade overlay and HUD bottom bar use these constants.
+
+### GameManager.cs
+
+Singleton. Full game loop. Owns `OverworldMap`, `BattleManager`, `PlayerTrainer`, `List<Region>`. Contains all draw methods including per-monster geometric sprite rendering (9 unique sprites — Kelabit, Bekantan, Mawas, Rajah, Enggang, Pelanduk, Temaju, Buaya, Naga Belian).
+
+**`ScreenW = 1280`, `ScreenH = 720` constants** defined at top — all draw calls reference these, no hardcoded 800/600 anywhere.
+
+Screens implemented: MainMenu (redesigned for 1280×720 with title card, 4-col roster grid, bottom hints bar), Overworld (delegates to OverworldMap.Draw()), Battle (region-specific backgrounds, entrance animation, animated HP bars, result overlay), PartyScreen, Victory, GameOver.
+
+Priority 4 visual features active: region-specific battle backgrounds, monster entrance slide-in animation (`_battleAnimFrame`), animated HP bar lerp (`_playerHpDisplay` / `_enemyHpDisplay`), `ShowBattleResult()` colour-coded overlay (2.5s, Enter to skip), animated twinkling stars + fireflies on main menu.
+
+
+## Priority 1 — Critical bugs to fix
+
+- [x] **Overworld movement** — both arrow keys and WASD work; SDL KeyCode values confirmed correct (UpKey=273 etc.)
+- [x] **Battle screen enemy reference** — `BattleManager.EnemyMonster` unified property added; all draw/logic points use it
+- [x] **Boss battle** — `StartBossBattle()` uses real `BossMonster` via `MonsterFactory.CreateNagaBelian()`; phase updates on each `EnemyTurn()`; `DrawNagaBelian()` sprite added
+
+## Priority 2 — Core gameplay features not yet working
+
+- [x] **Capture flow** — C key opens bag; CaptureOrb calls `BattleManager.AttemptCapture()`; caught monster converted via `MonsterFactory.Tame()` and added to party
+- [x] **Swap monster in battle** — X key opens purple swap panel; `Party.SwapToFront()` reorders party; enemy gets a turn after swap
+- [x] **Use item in battle** — bag panel shows Potions/StatusCures always, CaptureOrbs only in wild battles; items apply to active monster then enemy attacks
+- [x] **Status condition visual** — `ApplyStatusEffect()` called at start of both player and enemy turns; Frozen/Paralysed skip logic implemented
+- [x] **Flee/forfeit** — Esc closes sub-menus first; clean Esc calls `BattleManager.Flee()` → sets `PlayerFled` result
+
+## Priority 3 — Overworld improvements
+
+- [x] **Region cleared indicator** — HUD expands with green "REGION CLEARED!" badge; EXIT tile pulses gold when cleared
+- [x] **Player spawn position per region** — MapFactory passes `spawnTileX/Y` per map; Rainforest spawns at (4,2), Delta/Highlands at (2,2)
+- [x] **Encounter rate tuning** — changed from 4% per frame to 15% per new tile entered; uses tile-change detection (`_lastTileX/Y`)
+- [x] **Region transition effect** — EXIT tile triggers fade-to-black (8 alpha/frame ≈ 0.5s); input frozen during fade; `RegionExitTriggered` fires when alpha reaches 255
+
+## Priority 4 — Visual polish
+
+- [x] **Battle background per region** — Rainforest uses sky-blue/green; River Delta uses misty grey-blue/olive; Highlands uses purple-dusk/rocky brown; Boss uses deep navy
+- [x] **Monster entrance animation** — enemy slides in from right, player from left over 25 frames with ease-out curve (`_battleAnimFrame` counter)
+- [x] **HP bar animation** — `_playerHpDisplay` / `_enemyHpDisplay` lerp toward actual `HpPercent` at 12% per frame; snaps when within 0.4%
+- [x] **Battle result screen** — `ShowBattleResult()` shows colour-coded overlay (gold=win, red=loss, blue=flee) for 2.5s before `EndBattle()`; Enter skips
+- [x] **Main menu animated elements** — 30 twinkling stars drift with sine-wave offsets; 18 green fireflies hover near the jungle silhouette, both driven by `TimerTicks("blink")`
+
+## Priority 5 — UI/UX Polish & Gameplay Improvements (CURRENT FOCUS)
+
+### 5.1 Window size
+- [x] Increase window size to at least 1280×720 — window now 1280×720
+- [x] After resizing, re-anchor all hardcoded x/y draw positions relative to screen width/height constants — all draw methods in GameManager updated; OverworldMap camera, tile skip, HUD, and fade overlay updated
+- [x] Define `ScreenW` and `ScreenH` as constants at the top of GameManager and OverworldMap, referenced throughout all draw calls instead of hardcoded 800/600
+
+### 5.2 Main menu redesign
+- [x] Redesign main menu layout — centre-align all elements vertically and horizontally relative to 1280×720
+- [x] Add a styled title card with a decorative double-border panel behind the game title (700px wide, centred)
+- [x] Align monster roster list into a clean 4-column grid with consistent 200px column spacing
+- [x] Add a brief one-line tagline "Explore Sarawak. Tame the Wild. Become a Guardian." below the title
+- [x] Blinking "Press Enter to Start" prompt is clearly separated from the monster list and visually prominent (boxed, centred)
+- [x] Key hints at the bottom bar: "Enter: Start  Esc: Quit  P: Party Screen"
+
+#### 5.1/5.2 Visual bug fixes applied (2026-06-03)
+- [x] Main menu title "Monster Tamer" and "Guardians of Sarawak" now centred using `SplashKit.TextWidth()` — previously used hardcoded offset estimates
+- [x] "Press Enter to Start" text centred within blinking box using `TextWidth()`
+- [x] Unicode star (★), middle dot (·), and em dash (—) replaced with ASCII `*` and `-` — SplashKit renders these as "?"
+- [x] Overworld tile map now scales to fill the full 1280×720 window — `DrawTile` accepts `w, h` params, `Draw()` computes `scaleX = 1280/800 = 1.6`, `scaleY = 720/640 = 1.125`; player and NPC screen positions scaled accordingly; camera offset removed for small maps
+- [x] Window launches fullscreen via `_window.ToggleFullscreen()` in GameManager constructor
+- [x] Battle screen draw order fixed — `DrawBattleLog()` moved before info panels so log no longer occludes player info panel (both occupy x 590–1264)
+- [x] Enemy info panel: orange border + "ENEMY" label; player info panel: blue border + "YOUR MONSTER" label — visually distinct
+
+### Priority 5.1/5.2 Final Bug Fixes
+
+Context:
+Battle UI redesign has been implemented.
+Remaining issues:
+
+[x] 1. Tamed Monster info panel still overlaps visually with battle log.
+[x] 2. Enemy and player info panels need stronger visual distinction.
+
+Goal:
+[x] Resolve all remaining battle UI issues before starting Priority 5.3.
+
+
+### 5.3 Wild encounter prompt (do not auto-start battle)
+- [x] When player walks into tall grass and a wild monster triggers, do NOT immediately start the battle
+- [x] Instead show an encounter prompt overlay on the overworld screen with:
+  - Monster name, level, and type badges
+  - Monster sprite (reuse existing geometric sprite renderer)
+  - Two options: "Fight" (Enter) and "Run" (Esc or R key)
+- [x] Add a new `GameState` value: `EncounterPrompt`
+- [x] Only transition to `GameState.Battle` if the player selects Fight
+- [x] If player selects Run, dismiss the prompt and apply a longer encounter cooldown (~5 seconds)
+
+
+### 5.4 Monster sprite improvements (battle screen) 
+- [x] Review each monster's geometric sprite and improve proportions — specifically: 
+  - Kelabit: make casque ridge more prominent, wing span wider 
+  - Bekantan: big nose should be the most prominent feature 
+  - Mawas: longer arms reaching the ground 
+  - Rajah: wings should dominate the sprite, more colour contrast 
+  - Buaya: longer body, more visible teeth row 
+  - Temaju: clearer scale pattern layering 
+  - Pelanduk: taller ears relative to body 
+  - Enggang: rounder bear body, more visible yellow chest patch 
+- [x] Add a subtle idle animation (slight vertical bob, 1-2px oscillation using timer ticks) - [x] Enemy sprite (back/front view) should be slightly larger than player sprite to indicate it is the focus
+
+
+### 5.4 Monster sprite asset migration
+- [x] Replace the manually drawn SplashKit geometric monster sprites with PNG sprite assets stored in Resources/Images
+- [x] Use the following sprite assets:
+  - bekantan.png
+  - buaya.png
+  - enggang.png
+  - kelabit.png
+  - mawas.png
+  - nagabelian.png
+  - pelanduk.png
+  - rajah.png
+  - temaju.png
+- [x] All sprite assets are:
+  - PNG format
+  - 1024×1024 resolution
+  - Transparent background
+- [x] Preserve existing monster-to-sprite mapping
+- [x] Continue displaying monster sprites in:
+  - Battle screen
+  - Wild EncounterPrompt
+  - Boss EncounterPrompt
+  - Any existing monster preview UI
+- [x] Preserve the idle animation introduced in Priority 5.4:
+  - subtle vertical bob (1–2px oscillation)
+- [x] Enemy sprites should remain slightly larger than player sprites
+- [x] Implement efficient sprite loading:
+  - load once
+  - cache/reuse
+  - do not reload every frame
+- [x] Remove or retire obsolete geometric sprite rendering code if no longer required
+- [x] Preserve all existing gameplay behaviour and UI layouts
+
+
+## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
+
+### 6.1 Class diagram updates (address lecturer feedback)
+- [ ] Add abstract methods to abstract class boxes in italics:
+  - Monster: *GetBattleCry()*, *GetDescription()*
+  - Move: *Execute()*, *GetMoveCategory()*
+  - Item: *Use()*, *GetDescription()*
+  - Trainer: *ChooseAction()*
+- [ ] Add overriding methods to each child class box (same method names, not italicised)
+- [ ] Add fields inside class boxes that justify relationship arrows:
+  - PlayerTrainer box: show `_party : Party`, `_bag : Inventory`
+  - Party box: show `_monsters : List<TamedMonster>`
+  - GameManager box: show `_instance : GameManager` (underlined, static), `_player : PlayerTrainer`, `_currentRegion : Region`
+  - Inventory box: show `_items : List<Item>`
+- [ ] Add UML note boxes for each design pattern near relevant classes:
+  - Near GameManager: "Singleton Pattern — only one instance via GetInstance()"
+  - Near MonsterFactory: "Factory Pattern — centralises monster creation"
+  - Near Trainer/PlayerTrainer/AITrainer: "Strategy Pattern — ChooseAction() is the strategy interface"
+- [ ] Redraw Figure 4 (Updated Class Diagram) to reflect all the above
+
+### 6.2 Sequence diagram (no changes needed — already finalised)
+
+### 6.3 Additional features section (already rewritten — verify it matches final code)
+
+### 6.4 Sample output
+- [ ] Take new screenshots showing: main menu, overworld movement, encounter prompt, battle screen with animations, capture result screen, party screen, shop
+- [ ] Consider a short screen recording (GIF or MP4) showing a full gameplay loop
+
+### 6.5 Required Roles tables — add missing classes
+- [ ] Add table for `BattleState` class
+- [ ] Add table for `BattleResult` enum
+- [ ] Add table for `MonsterFactory` (static class, Factory Pattern)
+- [ ] Add table for `OverworldMap` class
+- [ ] Add table for `OverworldPlayer` class
+- [ ] Add table for `TrainerNPC` class
+- [ ] Add table for `TypeChart` (static class)
+- [ ] Add table for `MapFactory` (static class)
+
+### 6.6 Final playthrough checklist
+- [ ] MainMenu → Enter → Overworld loads correctly
+- [ ] WASD/Arrow movement works, camera follows player
+- [ ] Walking into tall grass triggers encounter prompt (not instant battle)
+- [ ] Selecting Fight starts battle, selecting Run dismisses prompt
+- [ ] Battle: all 4 move types work correctly (Attack with type effectiveness, Heal, Status with correct skip logic)
+- [ ] Capture: orb throw animation plays, result screen shows on catch
+- [ ] Win battle: XP awarded, party screen shows updated level if levelled up
+- [ ] Lose battle: game over screen
+- [ ] Flee: returns to overworld
+- [ ] Shop: can buy potions and orbs with earned gold
+- [ ] All 3 regions accessible, trainer battles work, region clears after all trainers defeated
+- [ ] EXIT tile transitions to next region with fade
+- [ ] Final boss (Naga Belian) triggers after all regions cleared, 3 phases work
+- [ ] Victory screen after defeating Naga Belian

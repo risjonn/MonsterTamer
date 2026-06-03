@@ -16,6 +16,7 @@ namespace MonsterTamer
     {
         MainMenu,
         Overworld,
+        EncounterPrompt,
         Battle,
         PartyScreen,
         Victory,

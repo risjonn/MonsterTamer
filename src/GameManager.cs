@@ -1,5 +1,7 @@
 using SplashKitSDK;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MonsterTamer
 {
@@ -14,10 +16,33 @@ namespace MonsterTamer
         private List<Region>    _regions;
         private int             _currentRegionIndex;
         private OverworldMap?   _overworldMap;
+        private bool            _showingItemMenu   = false;
+        private int             _selectedItemIndex = 0;
+        private bool            _showingSwapMenu    = false;
+        private int             _selectedSwapIndex  = 0;
+        private WildMonster?    _pendingEncounter        = null;
+        private AITrainer?      _pendingTrainerEncounter = null;
+        private AITrainer?      _lastTrainerBattled      = null;
+
+        // Priority 4 — visual polish state
+        private int             _battleAnimFrame     = 0;
+        private float           _playerHpDisplay     = 1.0f;
+        private float           _enemyHpDisplay      = 1.0f;
+        private bool            _pendingBattleEnd    = false;
+        private int             _battleResultTimer   = 0;
+        private string          _battleResultMessage = "";
+
+        // Sprite cache — loaded once in Run(), keyed by monster name
+        private Dictionary<string, Bitmap> _monsterSprites = new();
+
+        // Screen resolution constants — reference everywhere instead of hardcoded 800/600
+        private const int ScreenW = 1280;
+        private const int ScreenH = 720;
 
         private GameManager()
         {
-            _window             = new Window("Monster Tamer: Guardians of Sarawak", 800, 600);
+            _window             = new Window("Monster Tamer: Guardians of Sarawak", ScreenW, ScreenH);
+            _window.ToggleFullscreen();
             _state              = GameState.MainMenu;
             _player             = new PlayerTrainer("Ranger");
             _regions            = new List<Region>();
@@ -112,6 +137,7 @@ namespace MonsterTamer
         {
             SplashKit.CreateTimer("blink");
             SplashKit.StartTimer("blink");
+            LoadMonsterSprites();
 
             while (!_window.CloseRequested)
             {
@@ -126,7 +152,29 @@ namespace MonsterTamer
         {
             if (SplashKit.KeyTyped(KeyCode.EscapeKey))
             {
-                if (_state == GameState.Battle || _state == GameState.PartyScreen)
+                if (_state == GameState.Battle)
+                {
+                    if (_pendingBattleEnd) return;
+                    // Close sub-menus first; a clean Esc flees
+                    if (_showingItemMenu || _showingSwapMenu)
+                    {
+                        _showingItemMenu = false;
+                        _showingSwapMenu = false;
+                    }
+                    else
+                    {
+                        _battleManager?.Flee();
+                        ShowBattleResult();
+                    }
+                }
+                else if (_state == GameState.EncounterPrompt)
+                {
+                    _pendingEncounter        = null;
+                    _pendingTrainerEncounter = null;
+                    _state = GameState.Overworld;
+                    _overworldMap?.ApplyFleeingCooldown();
+                }
+                else if (_state == GameState.PartyScreen)
                     _state = GameState.Overworld;
                 else if (_state == GameState.Overworld)
                     _state = GameState.MainMenu;
@@ -141,6 +189,30 @@ namespace MonsterTamer
                     if (SplashKit.KeyTyped(KeyCode.ReturnKey) ||
                         SplashKit.KeyTyped(KeyCode.SpaceKey))
                         _state = GameState.Overworld;
+                    break;
+
+                case GameState.EncounterPrompt:
+                    if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+                    {
+                        if (_pendingEncounter != null)
+                        {
+                            StartWildBattle(_pendingEncounter);
+                            _pendingEncounter = null;
+                        }
+                        else if (_pendingTrainerEncounter != null)
+                        {
+                            _lastTrainerBattled      = _pendingTrainerEncounter;
+                            StartTrainerBattle(_pendingTrainerEncounter);
+                            _pendingTrainerEncounter = null;
+                        }
+                    }
+                    else if (SplashKit.KeyTyped(KeyCode.RKey))
+                    {
+                        _pendingEncounter        = null;
+                        _pendingTrainerEncounter = null;
+                        _state = GameState.Overworld;
+                        _overworldMap?.ApplyFleeingCooldown();
+                    }
                     break;
 
                 case GameState.Battle:
@@ -169,24 +241,185 @@ namespace MonsterTamer
         private void HandleBattleInput()
         {
             if (_battleManager == null) return;
-
-            if (SplashKit.KeyTyped(KeyCode.LeftKey))  _player.SelectedMoveIndex--;
-            if (SplashKit.KeyTyped(KeyCode.RightKey)) _player.SelectedMoveIndex++;
-            if (SplashKit.KeyTyped(KeyCode.UpKey))    _player.SelectedMoveIndex -= 2;
-            if (SplashKit.KeyTyped(KeyCode.DownKey))  _player.SelectedMoveIndex += 2;
-
-            if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+            if (_pendingBattleEnd)
             {
-                _battleManager.PlayerTurn(_player.SelectedMoveIndex);
+                if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+                {
+                    _pendingBattleEnd  = false;
+                    _battleResultTimer = 0;
+                    EndBattle();
+                }
+                return;
+            }
+
+            if (_showingSwapMenu)
+            {
+                HandleSwapInput();
+            }
+            else if (_showingItemMenu)
+            {
+                HandleItemInput();
+            }
+            else
+            {
+                // Move selection
+                if (SplashKit.KeyTyped(KeyCode.LeftKey))  _player.SelectedMoveIndex--;
+                if (SplashKit.KeyTyped(KeyCode.RightKey)) _player.SelectedMoveIndex++;
+                if (SplashKit.KeyTyped(KeyCode.UpKey))    _player.SelectedMoveIndex -= 2;
+                if (SplashKit.KeyTyped(KeyCode.DownKey))  _player.SelectedMoveIndex += 2;
+
+                if (SplashKit.KeyTyped(KeyCode.CKey))
+                {
+                    _showingItemMenu   = true;
+                    _selectedItemIndex = 0;
+                }
+                if (SplashKit.KeyTyped(KeyCode.XKey))
+                {
+                    _showingSwapMenu   = true;
+                    _selectedSwapIndex = 0;
+                }
+
+                if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+                {
+                    _battleManager.PlayerTurn(_player.SelectedMoveIndex);
+                    if (!_battleManager.IsBattleOver())
+                        _battleManager.EnemyTurn();
+                    if (_battleManager.IsBattleOver())
+                        ShowBattleResult();
+                }
+            }
+        }
+
+        private void HandleItemInput()
+        {
+            if (_battleManager == null) return;
+
+            // Wild battle: show all items; trainer/boss: hide Capture Orbs
+            bool isWild = _battleManager.WildTarget != null;
+            List<Item> items = _player.Bag.GetAllItems()
+                .Where(i => isWild || !(i is CaptureOrb))
+                .ToList();
+
+            if (SplashKit.KeyTyped(KeyCode.UpKey)   || SplashKit.KeyTyped(KeyCode.LeftKey))
+                _selectedItemIndex = Math.Max(0, _selectedItemIndex - 1);
+            if (SplashKit.KeyTyped(KeyCode.DownKey) || SplashKit.KeyTyped(KeyCode.RightKey))
+                _selectedItemIndex = Math.Min(Math.Max(0, items.Count - 1), _selectedItemIndex + 1);
+
+            if (SplashKit.KeyTyped(KeyCode.CKey))
+            {
+                _showingItemMenu = false;
+                return;
+            }
+
+            if (SplashKit.KeyTyped(KeyCode.ReturnKey) &&
+                items.Count > 0 && _selectedItemIndex < items.Count)
+            {
+                Item item = items[_selectedItemIndex];
+                _player.Bag.RemoveItem(item);
+                _showingItemMenu = false;
+
+                if (item is CaptureOrb orb)
+                {
+                    CaptureResult result = _battleManager.AttemptCapture(orb);
+                    if (result == CaptureResult.Caught)
+                    {
+                        TamedMonster tamed = MonsterFactory.Tame(_battleManager.WildTarget!);
+                        if (_player.Party.AddMonster(tamed))
+                            _battleManager.AddLog($"{tamed.Name} joined your party!");
+                        else
+                            _battleManager.AddLog($"{tamed.Name} was released — party is full!");
+                        EndBattle();
+                        return;
+                    }
+                }
+                else
+                {
+                    // Potion or StatusCure — apply to active monster
+                    TamedMonster? active = _player.GetActiveMonster();
+                    if (active != null)
+                    {
+                        item.Use(active);
+                        _battleManager.AddLog($"Used {item.Name} on {active.Name}!");
+                    }
+                }
+
+                // Item used — enemy takes their turn
                 if (!_battleManager.IsBattleOver())
                     _battleManager.EnemyTurn();
                 if (_battleManager.IsBattleOver())
-                    EndBattle();
+                    ShowBattleResult();
+            }
+        }
+
+        private void HandleSwapInput()
+        {
+            if (_battleManager == null) return;
+
+            int partyCount = _player.Party.Count;
+
+            if (SplashKit.KeyTyped(KeyCode.UpKey)   || SplashKit.KeyTyped(KeyCode.LeftKey))
+                _selectedSwapIndex = Math.Max(0, _selectedSwapIndex - 1);
+            if (SplashKit.KeyTyped(KeyCode.DownKey) || SplashKit.KeyTyped(KeyCode.RightKey))
+                _selectedSwapIndex = Math.Min(partyCount - 1, _selectedSwapIndex + 1);
+
+            if (SplashKit.KeyTyped(KeyCode.XKey))
+            {
+                _showingSwapMenu = false;
+                return;
+            }
+
+            if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+            {
+                TamedMonster  selected = _player.Party[_selectedSwapIndex];
+                TamedMonster? active   = _player.GetActiveMonster();
+
+                if (selected != active && selected.IsAlive)
+                {
+                    _player.Party.SwapToFront(_selectedSwapIndex);
+                    _playerHpDisplay = _player.GetActiveMonster()?.HpPercent ?? 1.0f;
+                    _battleManager.AddLog($"Go, {selected.Name}!");
+                    // Swapping uses the player's turn
+                    if (!_battleManager.IsBattleOver())
+                        _battleManager.EnemyTurn();
+                    if (_battleManager.IsBattleOver())
+                        ShowBattleResult();
+                }
+                _showingSwapMenu = false;
             }
         }
 
         public void Update()
         {
+            if (_state == GameState.Battle && _battleManager != null)
+            {
+                if (_battleAnimFrame < 30) _battleAnimFrame++;
+
+                TamedMonster? pm = _player.GetActiveMonster();
+                Monster?      em = _battleManager.EnemyMonster;
+                if (pm != null)
+                {
+                    float tgt = pm.HpPercent;
+                    _playerHpDisplay += (tgt - _playerHpDisplay) * 0.12f;
+                    if (Math.Abs(_playerHpDisplay - tgt) < 0.004f) _playerHpDisplay = tgt;
+                }
+                if (em != null)
+                {
+                    float tgt = em.HpPercent;
+                    _enemyHpDisplay += (tgt - _enemyHpDisplay) * 0.12f;
+                    if (Math.Abs(_enemyHpDisplay - tgt) < 0.004f) _enemyHpDisplay = tgt;
+                }
+
+                if (_pendingBattleEnd)
+                {
+                    _battleResultTimer--;
+                    if (_battleResultTimer <= 0)
+                    {
+                        _pendingBattleEnd = false;
+                        EndBattle();
+                    }
+                }
+            }
+
             if (_state == GameState.Overworld && _overworldMap != null)
             {
                 // Support both arrow keys and WASD for movement
@@ -200,12 +433,17 @@ namespace MonsterTamer
                 if (_overworldMap.WildEncounterTriggered)
                 {
                     WildMonster? encounter = _regions[_currentRegionIndex].GetRandomEncounter();
-                    if (encounter != null) StartWildBattle(encounter);
+                    if (encounter != null)
+                    {
+                        _pendingEncounter = encounter;
+                        _state = GameState.EncounterPrompt;
+                    }
                 }
                 else if (_overworldMap.TrainerEncounterTriggered &&
                          _overworldMap.TriggeredTrainer != null)
                 {
-                    StartTrainerBattle(_overworldMap.TriggeredTrainer);
+                    _pendingTrainerEncounter = _overworldMap.TriggeredTrainer;
+                    _state = GameState.EncounterPrompt;
                 }
                 else if (_overworldMap.RegionExitTriggered)
                 {
@@ -220,12 +458,13 @@ namespace MonsterTamer
 
             switch (_state)
             {
-                case GameState.MainMenu:    DrawMainMenu();    break;
-                case GameState.Overworld:   DrawOverworld();   break;
-                case GameState.Battle:      DrawBattle();      break;
-                case GameState.PartyScreen: DrawPartyScreen(); break;
-                case GameState.Victory:     DrawVictory();     break;
-                case GameState.GameOver:    DrawGameOver();    break;
+                case GameState.MainMenu:        DrawMainMenu();                        break;
+                case GameState.Overworld:       DrawOverworld();                       break;
+                case GameState.EncounterPrompt: DrawOverworld(); DrawEncounterPrompt(); break;
+                case GameState.Battle:          DrawBattle();                          break;
+                case GameState.PartyScreen:     DrawPartyScreen();                     break;
+                case GameState.Victory:         DrawVictory();                         break;
+                case GameState.GameOver:        DrawGameOver();                        break;
             }
 
             SplashKit.RefreshScreen(60);
@@ -239,6 +478,7 @@ namespace MonsterTamer
             _battleManager.AddLog($"A wild {wild.Name} appeared!");
             _battleManager.AddLog($"{wild.GetBattleCry()}");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
+            ResetBattleAnimState();
             _state = GameState.Battle;
         }
 
@@ -247,6 +487,7 @@ namespace MonsterTamer
             _battleManager = new BattleManager(_player, trainer);
             _battleManager.AddLog($"Trainer {trainer.Name} wants to battle!");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
+            ResetBattleAnimState();
             _state = GameState.Battle;
         }
 
@@ -267,92 +508,198 @@ namespace MonsterTamer
 
         private void StartBossBattle()
         {
-            AITrainer bossTrainer = new AITrainer("Naga Belian", 3);
-            TamedMonster boss = MonsterFactory.CreateKelabit(30);
-            bossTrainer.Party.AddMonster(boss);
+            BossMonster nagaBelian = MonsterFactory.CreateNagaBelian();
+            AITrainer   bossTrainer = new AITrainer("Naga Belian", 3);
             _battleManager = new BattleManager(_player, bossTrainer);
+            _battleManager.BossTarget = nagaBelian;
             _battleManager.AddLog("NAGA BELIAN EMERGES FROM THE DEPTHS!");
-            _battleManager.AddLog("The ancient sea dragon awakens...");
+            _battleManager.AddLog(nagaBelian.GetBattleCry());
+            ResetBattleAnimState();
             _state = GameState.Battle;
         }
 
         private void EndBattle()
         {
             if (_battleManager == null) return;
+            _showingItemMenu   = false;
+            _selectedItemIndex = 0;
+            _showingSwapMenu   = false;
+            _selectedSwapIndex = 0;
             if (_battleManager.Result == BattleResult.PlayerDied)
             {
+                _lastTrainerBattled = null;
                 _state = GameState.GameOver;
                 return;
             }
             if (_battleManager.Result == BattleResult.PlayerWon)
             {
+                // Mark the specific NPC defeated on the map only after a real win
+                if (_lastTrainerBattled != null)
+                    _overworldMap?.MarkTrainerDefeated(_lastTrainerBattled);
+
                 // Check if all trainers defeated — clear region
                 bool allDefeated = true;
                 foreach (AITrainer t in _regions[_currentRegionIndex].Trainers)
                     if (!t.Party.IsWiped()) { allDefeated = false; break; }
                 if (allDefeated)
+                {
                     _regions[_currentRegionIndex].Clear();
+                    _overworldMap?.SetCleared(true);
+                }
             }
+            _lastTrainerBattled = null;
             _state = GameState.Overworld;
+        }
+
+        private void ResetBattleAnimState()
+        {
+            _battleAnimFrame     = 0;
+            _playerHpDisplay     = _player.GetActiveMonster()?.HpPercent ?? 1.0f;
+            _enemyHpDisplay      = 1.0f;
+            _pendingBattleEnd    = false;
+            _battleResultTimer   = 0;
+            _battleResultMessage = "";
+        }
+
+        private void ShowBattleResult()
+        {
+            if (_battleManager == null) return;
+            string enemyName  = _battleManager.EnemyMonster?.Name ?? "Enemy";
+            string playerName = !string.IsNullOrEmpty(_battleManager.LastPlayerMonsterName)
+                                    ? _battleManager.LastPlayerMonsterName
+                                    : "Your monster";
+            _battleResultMessage = _battleManager.Result switch
+            {
+                BattleResult.PlayerWon  => _battleManager.BossTarget != null
+                                            ? "You defeated Naga Belian!"
+                                            : $"You won!  {enemyName} fainted!",
+                BattleResult.PlayerDied => $"{playerName} fainted!  Defeated...",
+                BattleResult.PlayerFled => "Got away safely!",
+                _                       => "Battle over!"
+            };
+            _pendingBattleEnd  = true;
+            _battleResultTimer = 150;
         }
 
         // ── Draw methods ────────────────────────────────────────
 
         private void DrawMainMenu()
         {
-            // Sky gradient simulation
-            SplashKit.FillRectangle(SplashKit.RGBColor(10, 40, 20),   0,   0, 800, 300);
-            SplashKit.FillRectangle(SplashKit.RGBColor(15, 55, 25),   0, 300, 800, 300);
+            int cx = ScreenW / 2; // horizontal centre = 640
 
-            // Jungle silhouette
-            SplashKit.FillEllipse(SplashKit.RGBColor(8, 30, 8),   20, 260, 200, 120);
-            SplashKit.FillEllipse(SplashKit.RGBColor(8, 30, 8),  150, 240, 260, 140);
-            SplashKit.FillEllipse(SplashKit.RGBColor(8, 30, 8),  380, 250, 220, 130);
-            SplashKit.FillEllipse(SplashKit.RGBColor(8, 30, 8),  560, 235, 280, 150);
-            SplashKit.FillRectangle(SplashKit.RGBColor(8, 30, 8), 0, 310, 800, 50);
+            // Sky gradient — top half darker, bottom slightly lighter
+            SplashKit.FillRectangle(SplashKit.RGBColor(10, 40, 20),  0,            0, ScreenW, ScreenH / 2);
+            SplashKit.FillRectangle(SplashKit.RGBColor(15, 55, 25),  0, ScreenH / 2, ScreenW, ScreenH / 2);
 
-            // Stars
-            for (int i = 0; i < 40; i++)
+            // Jungle silhouette spread across full 1280px
+            Color jungle = SplashKit.RGBColor(8, 30, 8);
+            SplashKit.FillEllipse(jungle,  -20, 320, 280, 170);
+            SplashKit.FillEllipse(jungle,  180, 292, 340, 190);
+            SplashKit.FillEllipse(jungle,  490, 308, 310, 175);
+            SplashKit.FillEllipse(jungle,  760, 285, 395, 205);
+            SplashKit.FillEllipse(jungle, 1050, 300, 315, 180);
+            SplashKit.FillRectangle(jungle, 0, 398, ScreenW, ScreenH - 398);
+
+            // Twinkling stars across full sky
+            long fireT = (long)SplashKit.TimerTicks("blink");
+            for (int i = 0; i < 30; i++)
             {
-                int sx = (i * 97 + 13) % 780 + 10;
-                int sy = (i * 53 + 7)  % 140 + 10;
-                SplashKit.FillCircle(SplashKit.RGBColor(255, 255, 200), sx, sy, 1);
+                double drift   = fireT / 2000.0 + i * 0.65;
+                int    fx      = (int)(80 + (i * 191 + 40) % (ScreenW - 160)
+                                     + Math.Cos(drift) * 18);
+                int    fy      = (int)(15 + (i * 67  + 20) % (ScreenH / 2 - 80)
+                                     + Math.Sin(drift * 1.3) * 10);
+                double twinkle = 0.35 + 0.65 * Math.Abs(Math.Sin(fireT / 420.0 + i * 1.1));
+                int    alpha   = (int)(twinkle * 230);
+                float  radius  = (float)(0.8 + Math.Abs(Math.Sin(fireT / 650.0 + i * 0.9)));
+                SplashKit.FillCircle(SplashKit.RGBAColor(255, 255, 160, alpha), fx, fy, radius);
+                if (twinkle > 0.75)
+                    SplashKit.FillCircle(SplashKit.RGBAColor(255, 255, 100, (int)(twinkle * 55)),
+                        fx, fy, radius * 2.5f);
+            }
+            // Fireflies drifting near the silhouette line
+            for (int i = 0; i < 20; i++)
+            {
+                double drift2   = fireT / 2400.0 + i * 1.05;
+                int    fx2      = (int)(20 + (i * 157 + 70) % (ScreenW - 40)
+                                      + Math.Cos(drift2 * 0.8) * 28);
+                int    fy2      = (int)(350 + (i * 43  + 10) % 100
+                                      + Math.Sin(drift2) * 15);
+                double twinkle2 = 0.25 + 0.75 * Math.Abs(Math.Sin(fireT / 370.0 + i * 1.4));
+                int    alpha2   = (int)(twinkle2 * 210);
+                SplashKit.FillCircle(SplashKit.RGBAColor(160, 255, 130, alpha2), fx2, fy2, 1.8f);
             }
 
-            // Title
+            // ── Title card panel (centred, 700px wide) ──────────────────────────
+            int panelX = cx - 350; // 290
+            int panelY = 128;
+            SplashKit.FillRectangle(SplashKit.RGBAColor(0, 15, 0, 175), panelX, panelY, 700, 200);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80),     panelX, panelY, 700, 200);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(45, 106, 79),     panelX + 6, panelY + 6, 688, 188);
+
+            // Title text — centred by measured width
+            int t1w = SplashKit.TextWidth("Monster Tamer", "Arial", 52);
             SplashKit.DrawText("Monster Tamer",
-                SplashKit.RGBColor(255, 215, 0), "Arial", 44, 185, 140);
+                SplashKit.RGBColor(255, 215, 0), "Arial", 52, cx - t1w / 2, panelY + 18);
+            int t2w = SplashKit.TextWidth("Guardians of Sarawak", "Arial", 26);
             SplashKit.DrawText("Guardians of Sarawak",
-                SplashKit.RGBColor(116, 198, 157), "Arial", 22, 230, 198);
+                SplashKit.RGBColor(116, 198, 157), "Arial", 26, cx - t2w / 2, panelY + 88);
 
-            // Divider
-            SplashKit.DrawLine(SplashKit.RGBColor(45, 106, 79), 180, 228, 620, 228);
+            // Decorative divider inside panel
+            SplashKit.DrawLine(SplashKit.RGBColor(45, 106, 79),
+                panelX + 20, panelY + 124, panelX + 680, panelY + 124);
 
-            // Monster list
-            string[] names = { "Kelabit","Bekantan","Mawas","Rajah",
-                                "Enggang","Pelanduk","Temaju","Buaya" };
+            // Tagline — centred
+            string tagline = "Explore Sarawak. Tame the Wild. Become a Guardian.";
+            int tagW = SplashKit.TextWidth(tagline, "Arial", 12);
+            SplashKit.DrawText(tagline,
+                SplashKit.RGBColor(100, 160, 110), "Arial", 12, cx - tagW / 2, panelY + 136);
+
+            // ── Monster roster ───────────────────────────────────────────────────
+            SplashKit.DrawText("[ Sarawak Monster Roster ]",
+                SplashKit.RGBColor(80, 160, 110), "Arial", 12, cx - 96, 356);
+
+            string[] names = { "Kelabit", "Bekantan", "Mawas",  "Rajah",
+                                "Enggang", "Pelanduk", "Temaju", "Buaya" };
+            // 4-column grid, centred (each slot 200px wide → total 800px, offset = (1280-800)/2 = 240)
             for (int i = 0; i < names.Length; i++)
             {
                 int col = i % 4, row = i / 4;
-                int tx = 200 + col * 110, ty = 240 + row * 22;
-                SplashKit.DrawText(names[i],
+                int tx  = 240 + col * 200;
+                int ty  = 378 + row * 24;
+                SplashKit.DrawText("*  " + names[i],
                     SplashKit.RGBColor(170, 220, 170), "Arial", 13, tx, ty);
             }
-            SplashKit.DrawText("+ Naga Belian (Final Boss)",
-                SplashKit.RGBColor(255, 215, 0), "Arial", 13, 290, 286);
+            // Final boss line — centred, ASCII only
+            string bossLine = "*  Naga Belian  -  Final Boss  -  Legendary";
+            int bossLineW = SplashKit.TextWidth(bossLine, "Arial", 13);
+            SplashKit.DrawText(bossLine,
+                SplashKit.RGBColor(255, 215, 0), "Arial", 13, cx - bossLineW / 2, 430);
 
-            // Start prompt
+            // ── Blinking start prompt ────────────────────────────────────────────
             bool blink = (SplashKit.TimerTicks("blink") % 900) < 600;
             if (blink)
             {
-                SplashKit.FillRectangle(
-                    SplashKit.RGBColor(26, 71, 49), 270, 318, 260, 32);
-                SplashKit.DrawText("Press Enter to Start",
-                    SplashKit.RGBColor(116, 198, 157), "Arial", 14, 305, 328);
+                SplashKit.FillRectangle(SplashKit.RGBColor(26, 71, 49), cx - 155, 458, 310, 40);
+                SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80), cx - 155, 458, 310, 40);
+                string startText = "Press  Enter  to  Start";
+                int stW = SplashKit.TextWidth(startText, "Arial", 15);
+                SplashKit.DrawText(startText,
+                    SplashKit.RGBColor(116, 198, 157), "Arial", 15, cx - stW / 2, 469);
             }
 
+            // ── Flavour info line ────────────────────────────────────────────────
+            SplashKit.DrawText("3 Regions  ·  8 Tameables  ·  1 Legendary Boss",
+                SplashKit.RGBColor(70, 150, 90), "Arial", 11, cx - 192, 516);
+
+            // ── Bottom hints bar ─────────────────────────────────────────────────
+            SplashKit.FillRectangle(SplashKit.RGBAColor(0, 0, 0, 110), 0, ScreenH - 38, ScreenW, 38);
+            SplashKit.DrawText("Enter: Start          Esc: Quit          P: Party Screen",
+                SplashKit.RGBColor(100, 160, 110), "Arial", 11, cx - 215, ScreenH - 22);
+
+            // Corner credit
             SplashKit.DrawText("Option 4  ·  C# with SplashKit",
-                SplashKit.RGBColor(45, 106, 79), "Arial", 10, 295, 572);
+                SplashKit.RGBColor(45, 106, 79), "Arial", 10, ScreenW - 284, ScreenH - 22);
         }
 
         private void DrawOverworld()
@@ -361,339 +708,356 @@ namespace MonsterTamer
                 _overworldMap.Draw(_window);
         }
 
+        private void DrawEncounterPrompt()
+        {
+            if (_pendingEncounter != null)
+                DrawWildEncounterCard();
+            else if (_pendingTrainerEncounter != null)
+                DrawTrainerEncounterCard();
+        }
+
+        private void DrawEncounterCardShell(int cardX, int cardY, int cardW, int cardH, string title)
+        {
+            int cardCx = cardX + cardW / 2;
+            SplashKit.FillRectangle(SplashKit.RGBAColor(0, 0, 0, 170), 0, 0, ScreenW, ScreenH);
+            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 28, 12, 245), cardX, cardY, cardW, cardH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 200, 80),       cardX, cardY, cardW, cardH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(45, 120, 45),       cardX + 3, cardY + 3, cardW - 6, cardH - 6);
+            SplashKit.FillRectangle(SplashKit.RGBAColor(30, 100, 30, 200), cardX + 1, cardY + 1, cardW - 2, 38);
+            int titleW = SplashKit.TextWidth(title, "Arial", 18);
+            SplashKit.DrawText(title, SplashKit.RGBColor(255, 215, 0), "Arial", 18,
+                cardCx - titleW / 2, cardY + 10);
+        }
+
+        private void DrawEncounterButtonRow(int cardX, int btnY, int cardW)
+        {
+            int cardCx = cardX + cardW / 2;
+            int btnW   = 240;
+            int btnH   = 88;
+            int fightX = cardCx - 20 - btnW;
+            int runX   = cardCx + 20;
+
+            SplashKit.DrawLine(SplashKit.RGBColor(45, 100, 45),
+                cardX + 20, btnY - 8, cardX + cardW - 20, btnY - 8);
+
+            SplashKit.FillRectangle(SplashKit.RGBColor(30, 90, 30),   fightX, btnY, btnW, btnH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(255, 215,   0), fightX, btnY, btnW, btnH);
+            string fl  = "FIGHT";
+            int    flW = SplashKit.TextWidth(fl, "Arial", 18);
+            SplashKit.DrawText(fl, SplashKit.RGBColor(255, 215, 0), "Arial", 18,
+                fightX + btnW / 2 - flW / 2, btnY + 14);
+            string fk  = "[Enter]";
+            int    fkW = SplashKit.TextWidth(fk, "Arial", 12);
+            SplashKit.DrawText(fk, SplashKit.RGBColor(170, 220, 170), "Arial", 12,
+                fightX + btnW / 2 - fkW / 2, btnY + 44);
+
+            SplashKit.FillRectangle(SplashKit.RGBColor(60, 30, 10),   runX, btnY, btnW, btnH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(200, 120, 50),  runX, btnY, btnW, btnH);
+            string rl  = "RUN";
+            int    rlW = SplashKit.TextWidth(rl, "Arial", 18);
+            SplashKit.DrawText(rl, SplashKit.RGBColor(230, 160, 80), "Arial", 18,
+                runX + btnW / 2 - rlW / 2, btnY + 14);
+            string rk  = "[Esc / R]";
+            int    rkW = SplashKit.TextWidth(rk, "Arial", 12);
+            SplashKit.DrawText(rk, SplashKit.RGBColor(180, 140, 100), "Arial", 12,
+                runX + btnW / 2 - rkW / 2, btnY + 44);
+        }
+
+        private void DrawWildEncounterCard()
+        {
+            WildMonster m = _pendingEncounter!;
+
+            int cardX = 360, cardY = 140, cardW = 560, cardH = 420;
+            int cardCx = cardX + cardW / 2; // 640
+
+            DrawEncounterCardShell(cardX, cardY, cardW, cardH, "! WILD ENCOUNTER !");
+
+            // Sprite in upper section — baseSize=90f keeps it clear of text below
+            // displaySize = 90 * 1.3 = 117px, half ≈ 59px
+            int spriteCy = cardY + 118;
+            DrawMonsterSprite(m.Name, cardCx, spriteCy, false, 90f);
+
+            // Text info starts below sprite bottom (spriteCy + 59 + gap)
+            int infoY = spriteCy + 72;
+
+            string nameText = m.Name;
+            int nameW = SplashKit.TextWidth(nameText, "Arial", 20);
+            SplashKit.DrawText(nameText, SplashKit.ColorWhite(), "Arial", 20,
+                cardCx - nameW / 2, infoY);
+
+            string lvText = $"Lv.{m.Level}";
+            int lvW = SplashKit.TextWidth(lvText, "Arial", 14);
+            SplashKit.DrawText(lvText, SplashKit.RGBColor(170, 220, 170), "Arial", 14,
+                cardCx - lvW / 2, infoY + 26);
+
+            int primaryW    = TypeBadgeWidth(m.PrimaryType);
+            int secondaryW  = m.HasDualType ? TypeBadgeWidth(m.SecondaryType) : 0;
+            int totalBadgeW = primaryW + (m.HasDualType ? secondaryW + 6 : 0);
+            int badgeStartX = cardCx - totalBadgeW / 2;
+            DrawTypeBadge(m.PrimaryType, badgeStartX, infoY + 48);
+            if (m.HasDualType)
+                DrawTypeBadge(m.SecondaryType, badgeStartX + primaryW + 6, infoY + 48);
+
+            DrawEncounterButtonRow(cardX, infoY + 72, cardW);
+        }
+
+        private void DrawTrainerEncounterCard()
+        {
+            AITrainer trainer = _pendingTrainerEncounter!;
+
+            int cardX  = 200, cardY = 90, cardW = 880, cardH = 460;
+            int cardCx = cardX + cardW / 2; // 640
+
+            DrawEncounterCardShell(cardX, cardY, cardW, cardH, "! TRAINER ENCOUNTER !");
+
+            // Trainer name
+            string trName = trainer.Name;
+            int    tnW    = SplashKit.TextWidth(trName, "Arial", 20);
+            SplashKit.DrawText(trName, SplashKit.ColorWhite(), "Arial", 20,
+                cardCx - tnW / 2, cardY + 48);
+
+            // Inner divider + party label
+            SplashKit.DrawLine(SplashKit.RGBColor(45, 120, 45),
+                cardX + 20, cardY + 76, cardX + cardW - 20, cardY + 76);
+            SplashKit.DrawText("Party:", SplashKit.RGBColor(130, 190, 130), "Arial", 11,
+                cardX + 20, cardY + 82);
+
+            // Monster slots — up to 3 per row
+            // baseSize=90f, scale=1.3 → displaySize≈117px, half≈59px
+            int   monCount  = Math.Min(trainer.Party.Count, 6);
+            int   perRow    = Math.Min(monCount, 3);
+            int   slotW     = cardW / (perRow > 0 ? perRow : 1);
+            int   spriteCy  = cardY + 158;
+            int   rowGap    = 165;
+            const int SpriteHalf = 59;
+
+            for (int i = 0; i < monCount; i++)
+            {
+                TamedMonster m      = trainer.Party[i];
+                int          col    = i % perRow;
+                int          row    = i / perRow;
+                float        monCx  = cardX + slotW * col + slotW / 2.0f;
+                int          monCy  = spriteCy + row * rowGap;
+
+                DrawMonsterSprite(m.Name, monCx, monCy, false, 90f);
+
+                // Text below sprite bottom — no overlap
+                int textY = monCy + SpriteHalf + 8;
+
+                string nameText = m.Name;
+                int    nw       = SplashKit.TextWidth(nameText, "Arial", 14);
+                SplashKit.DrawText(nameText, SplashKit.ColorWhite(), "Arial", 14,
+                    (int)(monCx - nw / 2), textY);
+
+                string lvText = $"Lv.{m.Level}";
+                int    lw     = SplashKit.TextWidth(lvText, "Arial", 11);
+                SplashKit.DrawText(lvText, SplashKit.RGBColor(170, 220, 170), "Arial", 11,
+                    (int)(monCx - lw / 2), textY + 18);
+
+                int primaryW  = TypeBadgeWidth(m.PrimaryType);
+                int secondaryW = m.HasDualType ? TypeBadgeWidth(m.SecondaryType) : 0;
+                int totalBW   = primaryW + (m.HasDualType ? secondaryW + 6 : 0);
+                int bStartX   = (int)(monCx - totalBW / 2);
+                DrawTypeBadge(m.PrimaryType, bStartX, textY + 34);
+                if (m.HasDualType)
+                    DrawTypeBadge(m.SecondaryType, bStartX + primaryW + 6, textY + 34);
+            }
+
+            DrawEncounterButtonRow(cardX, cardY + 370, cardW);
+        }
+
         private void DrawBattle()
         {
             if (_battleManager == null) return;
 
             TamedMonster? playerMon = _player.GetActiveMonster();
-            Monster? enemyMon = (Monster?)_battleManager.WildTarget
-                             ?? _battleManager.Opponent.GetActiveMonster();
+            Monster? enemyMon = _battleManager.EnemyMonster;
 
-            // Sky background
-            SplashKit.FillRectangle(SplashKit.RGBColor(100, 180, 240), 0,   0, 800, 320);
-            SplashKit.FillRectangle(SplashKit.RGBColor(60, 140, 60),   0, 280, 800, 320);
+            // Region-specific background palette
+            bool  isBoss = _battleManager?.BossTarget != null;
+            Color skyCol, groundCol, silhouetteCol, cloudCol, platFill, platEdge;
+            if (isBoss)
+            {
+                skyCol        = SplashKit.RGBColor(  5,   5,  30);
+                groundCol     = SplashKit.RGBColor( 10,  20,  55);
+                silhouetteCol = SplashKit.RGBColor(  0,   8,  40);
+                cloudCol      = SplashKit.RGBAColor(30,  55, 140, 180);
+                platFill      = SplashKit.RGBColor(  0,  25,  75);
+                platEdge      = SplashKit.RGBColor(  0,  55, 130);
+            }
+            else if (_currentRegionIndex == 1)   // River Delta — misty morning
+            {
+                skyCol        = SplashKit.RGBColor(140, 195, 215);
+                groundCol     = SplashKit.RGBColor( 80, 108,  55);
+                silhouetteCol = SplashKit.RGBColor( 35,  72,  30);
+                cloudCol      = SplashKit.RGBColor(225, 235, 245);
+                platFill      = SplashKit.RGBColor( 55,  88,  36);
+                platEdge      = SplashKit.RGBColor( 70, 110,  45);
+            }
+            else if (_currentRegionIndex == 2)   // Ancient Highlands — dusk
+            {
+                skyCol        = SplashKit.RGBColor( 75,  65, 105);
+                groundCol     = SplashKit.RGBColor(100,  88,  72);
+                silhouetteCol = SplashKit.RGBColor( 45,  40,  35);
+                cloudCol      = SplashKit.RGBColor(180, 165, 200);
+                platFill      = SplashKit.RGBColor( 80,  65,  50);
+                platEdge      = SplashKit.RGBColor( 98,  82,  62);
+            }
+            else                                  // Rainforest (region 0)
+            {
+                skyCol        = SplashKit.RGBColor(100, 180, 240);
+                groundCol     = SplashKit.RGBColor( 60, 140,  60);
+                silhouetteCol = SplashKit.RGBColor( 25,  80,  15);
+                cloudCol      = SplashKit.RGBColor(230, 240, 255);
+                platFill      = SplashKit.RGBColor( 40, 100,  25);
+                platEdge      = SplashKit.RGBColor( 60, 130,  40);
+            }
 
-            // Clouds
-            SplashKit.FillEllipse(SplashKit.RGBColor(230, 240, 255), 100, 40, 120, 40);
-            SplashKit.FillEllipse(SplashKit.RGBColor(230, 240, 255), 130, 30, 80,  30);
-            SplashKit.FillEllipse(SplashKit.RGBColor(230, 240, 255), 500, 55, 110, 38);
-            SplashKit.FillEllipse(SplashKit.RGBColor(230, 240, 255), 530, 44, 75,  28);
+            SplashKit.FillRectangle(skyCol,    0,   0, ScreenW, ScreenH - 340);
+            SplashKit.FillRectangle(groundCol, 0, 310, ScreenW, ScreenH - 310);
 
-            // Jungle silhouette
-            SplashKit.FillEllipse(SplashKit.RGBColor(25, 80, 15),  20, 200, 160, 100);
-            SplashKit.FillEllipse(SplashKit.RGBColor(25, 80, 15), 130, 185, 200, 110);
-            SplashKit.FillEllipse(SplashKit.RGBColor(25, 80, 15), 450, 193, 180, 105);
-            SplashKit.FillEllipse(SplashKit.RGBColor(25, 80, 15), 600, 183, 210, 115);
-            SplashKit.FillRectangle(SplashKit.RGBColor(25, 80, 15), 0, 250, 800, 80);
+            // Clouds / atmosphere spread across full 1280px
+            SplashKit.FillEllipse(cloudCol,   80,  40, 130, 42);
+            SplashKit.FillEllipse(cloudCol,  110,  28,  90, 32);
+            SplashKit.FillEllipse(cloudCol,  420,  50, 140, 44);
+            SplashKit.FillEllipse(cloudCol,  455,  36,  95, 30);
+            SplashKit.FillEllipse(cloudCol,  800,  42, 130, 40);
+            SplashKit.FillEllipse(cloudCol,  832,  30,  85, 28);
+            SplashKit.FillEllipse(cloudCol, 1090,  46, 150, 45);
+            SplashKit.FillEllipse(cloudCol, 1125,  33, 100, 30);
 
-            // Enemy platform
-            SplashKit.FillEllipse(SplashKit.RGBColor(40, 100, 25), 440, 155, 220, 44);
-            SplashKit.DrawEllipse(SplashKit.RGBColor(60, 130, 40), 440, 155, 220, 44);
+            // Background silhouette spread across 1280px
+            SplashKit.FillEllipse(silhouetteCol,   10, 215, 200, 120);
+            SplashKit.FillEllipse(silhouetteCol,  170, 198, 250, 130);
+            SplashKit.FillEllipse(silhouetteCol,  490, 210, 240, 120);
+            SplashKit.FillEllipse(silhouetteCol,  720, 198, 280, 130);
+            SplashKit.FillEllipse(silhouetteCol,  970, 212, 220, 118);
+            SplashKit.FillEllipse(silhouetteCol, 1100, 196, 260, 130);
+            SplashKit.FillRectangle(silhouetteCol, 0, 268, ScreenW, 80);
 
-            // Player platform
-            SplashKit.FillEllipse(SplashKit.RGBColor(35, 90, 20),  80, 290, 240, 50);
-            SplashKit.DrawEllipse(SplashKit.RGBColor(55, 120, 35),  80, 290, 240, 50);
+            // Enemy platform (right side of screen)
+            SplashKit.FillEllipse(platFill, 708, 198, 270, 50);
+            SplashKit.DrawEllipse(platEdge, 708, 198, 270, 50);
+
+            // Player platform (left side of screen)
+            SplashKit.FillEllipse(platFill, 132, 330, 280, 54);
+            SplashKit.DrawEllipse(platEdge, 132, 330, 280, 54);
+
+            // Entrance slide-in animation (eases over first 25 frames)
+            float slideT    = Math.Min(1f, _battleAnimFrame / 25f);
+            float easeOut   = 1f - (1f - slideT) * (1f - slideT);
+            float enemyOffX = (1f - easeOut) * 400f;
+            float plyrOffX  = -(1f - easeOut) * 400f;
 
             // Draw monster sprites
             if (enemyMon != null)
-                DrawMonsterSprite(enemyMon.Name, 550, 130, false);
+                DrawMonsterSprite(enemyMon.Name, 845 + enemyOffX, 168, false);
             if (playerMon != null)
-                DrawMonsterSprite(playerMon.Name, 175, 250, true);
+                DrawMonsterSprite(playerMon.Name, 272 + plyrOffX, 312, true);
 
-            // Enemy info panel
-            if (enemyMon != null)
-                DrawInfoPanel(enemyMon, 16, 16, 280, 88, false);
-
-            // Player info panel
-            if (playerMon != null)
-                DrawInfoPanel(playerMon, 504, 330, 280, 88, true);
-
-            // Move panel
-            if (playerMon != null)
-                DrawMovePanel(playerMon);
-
-            // Battle log
+            // Battle log first so info panels render on top of it
             DrawBattleLog();
 
-            // Controls hint
-            SplashKit.DrawText(
-                "Arrows: select move     Enter: use move     Esc: flee",
-                SplashKit.RGBColor(80, 80, 80), "Arial", 10, 20, 582);
-        }
-
-        private void DrawMonsterSprite(string name, float cx, float cy, bool isPlayer)
-        {
-            float scale = isPlayer ? 1.1f : 1.0f;
-
-            switch (name)
+            // Move / item / swap panel
+            if (playerMon != null)
             {
-                case "Kelabit": DrawKelabit(cx, cy, scale, isPlayer); break;
-                case "Bekantan": DrawBekantan(cx, cy, scale); break;
-                case "Mawas": DrawMawas(cx, cy, scale); break;
-                case "Rajah": DrawRajah(cx, cy, scale); break;
-                case "Enggang": DrawEnggang(cx, cy, scale); break;
-                case "Pelanduk": DrawPelanduk(cx, cy, scale); break;
-                case "Temaju": DrawTemaju(cx, cy, scale); break;
-                case "Buaya": DrawBuaya(cx, cy, scale); break;
-                default: DrawGenericMonster(cx, cy, scale); break;
+                if (_showingSwapMenu)
+                    DrawSwapPanel();
+                else if (_showingItemMenu)
+                    DrawItemPanel();
+                else
+                    DrawMovePanel(playerMon);
             }
 
-            // Shadow
-            SplashKit.FillEllipse(SplashKit.RGBAColor(0, 0, 0, 60),
-                cx - 30 * scale, cy + 10, 60 * scale, 14);
-        }
+            // Enemy info panel — top left (drawn after log so it's on top)
+            if (enemyMon != null)
+                DrawInfoPanel(enemyMon, 16, 16, 360, 110, false, _enemyHpDisplay);
+            if (enemyMon is BossMonster bossDisplay)
+                SplashKit.DrawText($"- PHASE {bossDisplay.Phase} / {bossDisplay.TotalPhases} -",
+                    SplashKit.RGBColor(255, 80, 80), "Arial", 11, 16, 130);
 
-        private void DrawKelabit(float cx, float cy, float s, bool back)
-        {
-            // Wings
-            SplashKit.FillEllipse(SplashKit.RGBColor(30, 90, 30),
-                cx - 55*s, cy - 45*s, 50*s, 70*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(30, 90, 30),
-                cx + 5*s,  cy - 45*s, 50*s, 70*s);
-            // Body
-            SplashKit.FillEllipse(SplashKit.RGBColor(60, 140, 60),
-                cx - 28*s, cy - 55*s, 56*s, 75*s);
-            // Head
-            SplashKit.FillCircle(SplashKit.RGBColor(60, 140, 60), cx, cy - 65*s, 22*s);
-            // Casque (hornbill beak ridge)
-            SplashKit.FillRectangle(SplashKit.RGBColor(255, 165, 0),
-                cx - 5*s, cy - 88*s, 38*s, 10*s);
-            SplashKit.FillRectangle(SplashKit.RGBColor(255, 200, 50),
-                cx - 4*s, cy - 82*s, 36*s, 8*s);
-            // Beak
-            SplashKit.FillTriangle(SplashKit.RGBColor(255, 140, 0),
-                cx - 2*s, cy - 72*s,
-                cx + 32*s, cy - 68*s,
-                cx - 2*s, cy - 62*s);
-            // Eyes
-            if (!back)
+            // Player info panel — lower-right scene area, above the battle log (y:430)
+            if (playerMon != null)
+                DrawInfoPanel(playerMon, ScreenW - 380, 318, 364, 108, true, _playerHpDisplay);
+
+            // Controls hint — context-sensitive, inside left panel bottom
+            string hint = _showingSwapMenu
+                ? "Up/Down: Select Monster     Enter: Send Out     X: Back"
+                : _showingItemMenu
+                    ? "Up/Down: Select Item     Enter: Use     C: Back"
+                    : "Arrows/Enter: Use Move     C: Bag     X: Swap     Esc: Flee";
+            SplashKit.DrawText(hint, SplashKit.RGBColor(90, 110, 90), "Arial", 10, 22, ScreenH - 18);
+
+            // Battle result overlay — fades in over 25 frames, then holds
+            if (_pendingBattleEnd && _battleManager != null)
             {
-                SplashKit.FillCircle(SplashKit.ColorWhite(), cx - 8*s, cy - 68*s, 5*s);
-                SplashKit.FillCircle(SplashKit.ColorBlack(), cx - 8*s, cy - 68*s, 3*s);
-                SplashKit.FillCircle(SplashKit.ColorWhite(), cx + 6*s, cy - 70*s, 4*s);
-                SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 6*s, cy - 70*s, 2*s);
-            }
-            // Feet
-            SplashKit.FillRectangle(SplashKit.RGBColor(200, 150, 0),
-                cx - 12*s, cy + 18*s, 8*s, 10*s);
-            SplashKit.FillRectangle(SplashKit.RGBColor(200, 150, 0),
-                cx + 4*s, cy + 18*s, 8*s, 10*s);
-        }
-
-        private void DrawBekantan(float cx, float cy, float s)
-        {
-            // Body
-            SplashKit.FillEllipse(SplashKit.RGBColor(180, 120, 60),
-                cx - 25*s, cy - 55*s, 50*s, 75*s);
-            // Arms
-            SplashKit.FillEllipse(SplashKit.RGBColor(160, 100, 50),
-                cx - 50*s, cy - 40*s, 28*s, 55*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(160, 100, 50),
-                cx + 22*s, cy - 40*s, 28*s, 55*s);
-            // Head
-            SplashKit.FillCircle(SplashKit.RGBColor(180, 120, 60), cx, cy - 68*s, 24*s);
-            // Big nose (proboscis)
-            SplashKit.FillEllipse(SplashKit.RGBColor(220, 160, 100),
-                cx - 10*s, cy - 72*s, 22*s, 28*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(200, 140, 80),
-                cx - 8*s, cy - 70*s, 18*s, 22*s);
-            // Eyes
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx - 10*s, cy - 76*s, 5*s);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx - 10*s, cy - 76*s, 3*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx + 8*s,  cy - 76*s, 5*s);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 8*s,  cy - 76*s, 3*s);
-            // Legs
-            SplashKit.FillRectangle(SplashKit.RGBColor(160, 100, 50),
-                cx - 20*s, cy + 18*s, 14*s, 14*s);
-            SplashKit.FillRectangle(SplashKit.RGBColor(160, 100, 50),
-                cx + 6*s, cy + 18*s, 14*s, 14*s);
-        }
-
-        private void DrawMawas(float cx, float cy, float s)
-        {
-            // Body — large
-            SplashKit.FillEllipse(SplashKit.RGBColor(160, 90, 30),
-                cx - 32*s, cy - 60*s, 64*s, 85*s);
-            // Long arms
-            SplashKit.FillEllipse(SplashKit.RGBColor(140, 75, 20),
-                cx - 60*s, cy - 50*s, 32*s, 70*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(140, 75, 20),
-                cx + 28*s, cy - 50*s, 32*s, 70*s);
-            // Head
-            SplashKit.FillCircle(SplashKit.RGBColor(160, 90, 30), cx, cy - 72*s, 26*s);
-            // Face disc
-            SplashKit.FillEllipse(SplashKit.RGBColor(200, 140, 80),
-                cx - 14*s, cy - 80*s, 28*s, 24*s);
-            // Eyes
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx - 6*s,  cy - 72*s, 4*s);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 6*s,  cy - 72*s, 4*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx - 7*s,  cy - 73*s, 2*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx + 5*s,  cy - 73*s, 2*s);
-        }
-
-        private void DrawRajah(float cx, float cy, float s)
-        {
-            // Wings — large and colourful
-            SplashKit.FillEllipse(SplashKit.RGBColor(0, 0, 0),
-                cx - 55*s, cy - 30*s, 50*s, 35*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(0, 0, 0),
-                cx + 5*s,  cy - 30*s, 50*s, 35*s);
-            // Wing colour patches
-            SplashKit.FillEllipse(SplashKit.RGBColor(0, 200, 100),
-                cx - 48*s, cy - 28*s, 35*s, 22*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(0, 200, 100),
-                cx + 12*s, cy - 28*s, 35*s, 22*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(255, 215, 0),
-                cx - 40*s, cy - 24*s, 18*s, 12*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(255, 215, 0),
-                cx + 22*s, cy - 24*s, 18*s, 12*s);
-            // Body
-            SplashKit.FillEllipse(SplashKit.RGBColor(20, 20, 20),
-                cx - 10*s, cy - 26*s, 20*s, 36*s);
-            // Head/antenna
-            SplashKit.FillCircle(SplashKit.RGBColor(20, 20, 20), cx, cy - 32*s, 10*s);
-            SplashKit.DrawLine(SplashKit.RGBColor(20, 20, 20),
-                cx - 4*s, cy - 40*s, cx - 10*s, cy - 52*s);
-            SplashKit.DrawLine(SplashKit.RGBColor(20, 20, 20),
-                cx + 4*s, cy - 40*s, cx + 10*s, cy - 52*s);
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 215, 0), cx - 10*s, cy - 52*s, 3*s);
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 215, 0), cx + 10*s, cy - 52*s, 3*s);
-            // Eyes
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 215, 0), cx - 4*s, cy - 33*s, 3*s);
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 215, 0), cx + 4*s, cy - 33*s, 3*s);
-        }
-
-        private void DrawEnggang(float cx, float cy, float s)
-        {
-            // Body — stocky bear
-            SplashKit.FillEllipse(SplashKit.RGBColor(40, 30, 20),
-                cx - 30*s, cy - 58*s, 60*s, 80*s);
-            // Arms
-            SplashKit.FillEllipse(SplashKit.RGBColor(35, 25, 15),
-                cx - 52*s, cy - 45*s, 25*s, 50*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(35, 25, 15),
-                cx + 27*s, cy - 45*s, 25*s, 50*s);
-            // Head
-            SplashKit.FillCircle(SplashKit.RGBColor(40, 30, 20), cx, cy - 68*s, 26*s);
-            // Chest patch (sun bear yellow)
-            SplashKit.FillEllipse(SplashKit.RGBColor(255, 200, 50),
-                cx - 14*s, cy - 52*s, 28*s, 22*s);
-            // Ears
-            SplashKit.FillCircle(SplashKit.RGBColor(40, 30, 20), cx - 20*s, cy - 88*s, 10*s);
-            SplashKit.FillCircle(SplashKit.RGBColor(40, 30, 20), cx + 20*s, cy - 88*s, 10*s);
-            // Eyes
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx - 8*s, cy - 70*s, 5*s);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 8*s, cy - 70*s, 5*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx - 9*s, cy - 71*s, 2*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx + 7*s, cy - 71*s, 2*s);
-            // Snout
-            SplashKit.FillEllipse(SplashKit.RGBColor(80, 60, 40),
-                cx - 8*s, cy - 62*s, 16*s, 10*s);
-        }
-
-        private void DrawPelanduk(float cx, float cy, float s)
-        {
-            // Legs — long and spindly
-            SplashKit.FillRectangle(SplashKit.RGBColor(140, 100, 60),
-                cx - 14*s, cy - 20*s, 6*s, 28*s);
-            SplashKit.FillRectangle(SplashKit.RGBColor(140, 100, 60),
-                cx + 8*s,  cy - 20*s, 6*s, 28*s);
-            // Body
-            SplashKit.FillEllipse(SplashKit.RGBColor(160, 120, 70),
-                cx - 20*s, cy - 52*s, 40*s, 40*s);
-            // Head — small
-            SplashKit.FillCircle(SplashKit.RGBColor(160, 120, 70), cx, cy - 60*s, 16*s);
-            // Ears — tall
-            SplashKit.FillEllipse(SplashKit.RGBColor(160, 120, 70),
-                cx - 12*s, cy - 78*s, 8*s, 20*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(160, 120, 70),
-                cx + 4*s,  cy - 78*s, 8*s, 20*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(220, 160, 140),
-                cx - 11*s, cy - 77*s, 6*s, 16*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(220, 160, 140),
-                cx + 5*s,  cy - 77*s, 6*s, 16*s);
-            // Eyes
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx - 5*s, cy - 62*s, 4*s);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 5*s, cy - 62*s, 4*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx - 6*s, cy - 63*s, 2*s);
-            SplashKit.FillCircle(SplashKit.ColorWhite(), cx + 4*s, cy - 63*s, 2*s);
-            // Tiny horns
-            SplashKit.FillRectangle(SplashKit.RGBColor(180, 140, 80),
-                cx - 4*s, cy - 74*s, 3*s, 8*s);
-            SplashKit.FillRectangle(SplashKit.RGBColor(180, 140, 80),
-                cx + 2*s, cy - 74*s, 3*s, 8*s);
-        }
-
-        private void DrawTemaju(float cx, float cy, float s)
-        {
-            // Rolled up pangolin shape
-            SplashKit.FillEllipse(SplashKit.RGBColor(120, 100, 70),
-                cx - 28*s, cy - 50*s, 56*s, 65*s);
-            // Scales — layered triangles
-            for (int row = 0; row < 4; row++)
-            {
-                for (int col = 0; col < 4; col++)
+                float fadeFrac = Math.Min(1f, (150 - _battleResultTimer) / 25f);
+                int   overlayA = (int)(fadeFrac * 185);
+                SplashKit.FillRectangle(SplashKit.RGBAColor(0, 0, 0, overlayA), 0, 0, ScreenW, ScreenH);
+                if (fadeFrac > 0.25f)
                 {
-                    float sx2 = cx - 22*s + col * 13*s;
-                    float sy2 = cy - 44*s + row * 13*s;
-                    SplashKit.FillTriangle(
-                        SplashKit.RGBColor(150, 120, 80),
-                        sx2, sy2 + 12*s,
-                        sx2 + 6*s, sy2,
-                        sx2 + 12*s, sy2 + 12*s);
-                    SplashKit.DrawTriangle(
-                        SplashKit.RGBColor(100, 80, 50),
-                        sx2, sy2 + 12*s,
-                        sx2 + 6*s, sy2,
-                        sx2 + 12*s, sy2 + 12*s);
+                    Color resultColor = _battleManager.Result == BattleResult.PlayerWon
+                        ? SplashKit.RGBColor(255, 215,   0)
+                        : _battleManager.Result == BattleResult.PlayerDied
+                            ? SplashKit.RGBColor(220,  60,  60)
+                            : SplashKit.RGBColor(140, 200, 255);
+                    int msgWidth = SplashKit.TextWidth(_battleResultMessage, "Arial", 28);
+                    int msgX = ScreenW / 2 - msgWidth / 2;
+                    SplashKit.DrawText(_battleResultMessage, resultColor, "Arial", 28, msgX, ScreenH / 2 - 50);
+                    int skipA = (int)(Math.Min(1f, (150 - _battleResultTimer) / 60f) * 210);
+                    SplashKit.DrawText("Press Enter to continue",
+                        SplashKit.RGBAColor(200, 200, 200, skipA), "Arial", 12, ScreenW / 2 - 90, ScreenH / 2 + 10);
                 }
             }
-            // Head peeking out
-            SplashKit.FillCircle(SplashKit.RGBColor(130, 110, 75),
-                cx + 20*s, cy - 30*s, 16*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(110, 90, 60),
-                cx + 24*s, cy - 28*s, 16*s, 8*s);
-            // Eye
-            SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 22*s, cy - 32*s, 3*s);
         }
 
-        private void DrawBuaya(float cx, float cy, float s)
+        private void LoadMonsterSprites()
         {
-            // Tail
-            SplashKit.FillEllipse(SplashKit.RGBColor(60, 100, 50),
-                cx - 60*s, cy - 15*s, 60*s, 22*s);
-            // Body
-            SplashKit.FillEllipse(SplashKit.RGBColor(70, 115, 55),
-                cx - 30*s, cy - 28*s, 70*s, 42*s);
-            // Legs
-            SplashKit.FillEllipse(SplashKit.RGBColor(60, 100, 50),
-                cx - 28*s, cy - 5*s, 20*s, 16*s);
-            SplashKit.FillEllipse(SplashKit.RGBColor(60, 100, 50),
-                cx + 8*s,  cy - 5*s, 20*s, 16*s);
-            // Head + long snout
-            SplashKit.FillEllipse(SplashKit.RGBColor(70, 115, 55),
-                cx + 26*s, cy - 26*s, 48*s, 22*s);
-            // Teeth
-            for (int i = 0; i < 5; i++)
+            var nameToFile = new Dictionary<string, string>
             {
-                SplashKit.FillTriangle(SplashKit.ColorWhite(),
-                    cx + 28*s + i*6*s, cy - 14*s,
-                    cx + 31*s + i*6*s, cy - 8*s,
-                    cx + 34*s + i*6*s, cy - 14*s);
+                ["Kelabit"]     = "kelabit",
+                ["Bekantan"]    = "bekantan",
+                ["Mawas"]       = "mawas",
+                ["Rajah"]       = "rajah",
+                ["Enggang"]     = "enggang",
+                ["Pelanduk"]    = "pelanduk",
+                ["Temaju"]      = "temaju",
+                ["Buaya"]       = "buaya",
+                ["Naga Belian"] = "nagabelian",
+            };
+
+            foreach (var (monsterName, filename) in nameToFile)
+                _monsterSprites[monsterName] = SplashKit.LoadBitmap(filename, filename + ".png");
+        }
+
+        private void DrawMonsterSprite(string name, float cx, float cy, bool isPlayer, float baseSize = 180f)
+        {
+            float  scale       = isPlayer ? 1.0f : 1.3f;
+            float  displaySize = baseSize * scale;
+            double bmpScale    = displaySize / 1024.0;
+
+            // Shadow stays grounded — not affected by the bob below
+            SplashKit.FillEllipse(SplashKit.RGBAColor(0, 0, 0, 60),
+                cx - displaySize * 0.15f, cy + displaySize * 0.45f,
+                displaySize * 0.30f, 14);
+
+            // Idle vertical bob applied to sprite only
+            float bob = (float)Math.Sin(SplashKit.TimerTicks("blink") / 400.0) * 2f;
+            cy += bob;
+
+            if (_monsterSprites.TryGetValue(name, out Bitmap? bmp))
+            {
+                // SplashKit scales from the centre of the original bitmap, not from (x,y).
+                // To render centred at (cx, cy) we must offset by half the ORIGINAL bitmap
+                // dimensions so the scale-from-centre transform lands at (cx, cy).
+                float drawX = cx - bmp.Width  / 2f;
+                float drawY = cy - bmp.Height / 2f;
+                SplashKit.DrawBitmap(bmp, drawX, drawY,
+                    SplashKit.OptionScaleBmp(bmpScale, bmpScale));
             }
-            // Eye
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 215, 0),
-                cx + 32*s, cy - 26*s, 6*s);
-            SplashKit.FillCircle(SplashKit.ColorBlack(),
-                cx + 32*s, cy - 26*s, 3*s);
-            // Scales on back
-            for (int i = 0; i < 5; i++)
+            else
             {
-                SplashKit.FillTriangle(
-                    SplashKit.RGBColor(50, 85, 40),
-                    cx - 20*s + i*12*s, cy - 28*s,
-                    cx - 14*s + i*12*s, cy - 38*s,
-                    cx - 8*s  + i*12*s, cy - 28*s);
+                DrawGenericMonster(cx, cy, scale);
             }
         }
 
@@ -706,53 +1070,81 @@ namespace MonsterTamer
             SplashKit.FillCircle(SplashKit.ColorBlack(), cx + 10*s, cy - 34*s, 5*s);
         }
 
-        private void DrawInfoPanel(Monster m, int x, int y, int w, int h, bool isPlayer)
+        private void DrawInfoPanel(Monster m, int x, int y, int w, int h, bool isPlayer, float displayHpPct = -1f)
         {
-            // Panel background
-            SplashKit.FillRectangle(SplashKit.RGBAColor(20, 35, 15, 230), x, y, w, h);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80), x, y, w, h);
+            // Team colours: blue = player, orange = enemy
+            Color borderC    = isPlayer
+                ? SplashKit.RGBColor( 60, 140, 220)
+                : SplashKit.RGBColor(220, 130,  50);
+            Color bgC        = isPlayer
+                ? SplashKit.RGBAColor(  8,  18,  55, 238)
+                : SplashKit.RGBAColor( 55,  16,   6, 238);
+            Color headerTint = isPlayer
+                ? SplashKit.RGBAColor( 60, 140, 220, 80)
+                : SplashKit.RGBAColor(220, 130,  50, 80);
+            string panelTag  = isPlayer ? "YOUR MONSTER" : "ENEMY";
 
-            // Name + level
-            SplashKit.DrawText(m.Name,
-                SplashKit.ColorWhite(), "Arial", 15, x + 10, y + 10);
+            // Background + double border for stronger frame
+            SplashKit.FillRectangle(bgC,     x,     y,     w,     h);
+            SplashKit.DrawRectangle(borderC,  x,     y,     w,     h);
+            SplashKit.DrawRectangle(borderC,  x + 1, y + 1, w - 2, h - 2);
+
+            // Coloured header strip
+            SplashKit.FillRectangle(headerTint, x + 1, y + 1, w - 2, 20);
+
+            // Role label centred in header
+            int tagW = SplashKit.TextWidth(panelTag, "Arial", 10);
+            SplashKit.DrawText(panelTag, borderC, "Arial", 10, x + w / 2 - tagW / 2, y + 4);
+
+            // Name + level (shifted down to clear header)
+            string dispName = m.Name;
+            int nameMaxW = w - 70;
+            while (dispName.Length > 3 && SplashKit.TextWidth(dispName, "Arial", 15) > nameMaxW)
+                dispName = dispName.Substring(0, dispName.Length - 4) + "...";
+            SplashKit.DrawText(dispName,
+                SplashKit.ColorWhite(), "Arial", 15, x + 10, y + 24);
             SplashKit.DrawText($"Lv.{m.Level}",
-                SplashKit.RGBColor(170, 220, 170), "Arial", 11, x + w - 44, y + 13);
+                SplashKit.RGBColor(170, 220, 170), "Arial", 11, x + w - 44, y + 27);
 
-            // Type badges
-            DrawTypeBadge(m.PrimaryType, x + 10, y + 30);
+            // Type badges — dynamic width prevents overflow
+            DrawTypeBadge(m.PrimaryType, x + 10, y + 44);
             if (m.HasDualType)
-                DrawTypeBadge(m.SecondaryType, x + 74, y + 30);
+                DrawTypeBadge(m.SecondaryType, x + 10 + TypeBadgeWidth(m.PrimaryType) + 4, y + 44);
 
-            // HP bar
+            // HP bar — use animated display value when provided
             int barW = w - 20;
-            SplashKit.FillRectangle(SplashKit.RGBColor(40, 40, 40), x + 10, y + 52, barW, 10);
-            float pct  = m.HpPercent;
-            Color barC = pct > 0.5f ? SplashKit.RGBColor(80, 220, 80)
-                       : pct > 0.25f ? SplashKit.RGBColor(240, 210, 40)
-                       : SplashKit.RGBColor(240, 60, 60);
+            SplashKit.FillRectangle(SplashKit.RGBColor(40, 40, 40), x + 10, y + 66, barW, 10);
+            float pct  = displayHpPct >= 0f ? displayHpPct : m.HpPercent;
+            Color barC = pct > 0.5f  ? SplashKit.RGBColor( 80, 220,  80)
+                       : pct > 0.25f ? SplashKit.RGBColor(240, 210,  40)
+                       :                SplashKit.RGBColor(240,  60,  60);
             int fillW  = (int)(barW * pct);
             if (fillW > 0)
-                SplashKit.FillRectangle(barC, x + 10, y + 52, fillW, 10);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 80, 80), x + 10, y + 52, barW, 10);
+                SplashKit.FillRectangle(barC, x + 10, y + 66, fillW, 10);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 80, 80), x + 10, y + 66, barW, 10);
             SplashKit.DrawText($"HP  {m.Hp} / {m.MaxHp}",
-                SplashKit.RGBColor(180, 180, 180), "Arial", 10, x + 10, y + 65);
+                SplashKit.RGBColor(180, 180, 180), "Arial", 10, x + 10, y + 79);
 
             // Status condition badge if any
             if (m.Status != StatusCondition.None)
             {
                 SplashKit.FillRectangle(SplashKit.RGBColor(180, 60, 180),
-                    x + w - 70, y + 62, 58, 16);
+                    x + w - 70, y + 76, 58, 16);
                 SplashKit.DrawText(m.Status.ToString(),
-                    SplashKit.ColorWhite(), "Arial", 9, x + w - 68, y + 65);
+                    SplashKit.ColorWhite(), "Arial", 9, x + w - 68, y + 79);
             }
         }
 
+        private int TypeBadgeWidth(MonsterType t)
+            => SplashKit.TextWidth(t.ToString(), "Arial", 10) + 12;
+
         private void DrawTypeBadge(MonsterType t, int x, int y)
         {
+            int badgeW = TypeBadgeWidth(t);
             Color bg = TypeBadgeColor(t);
-            SplashKit.FillRectangle(bg, x, y, 58, 16);
+            SplashKit.FillRectangle(bg, x, y, badgeW, 16);
             SplashKit.DrawText(t.ToString(),
-                SplashKit.ColorWhite(), "Arial", 10, x + 5, y + 3);
+                SplashKit.ColorWhite(), "Arial", 10, x + 6, y + 3);
         }
 
         private Color TypeBadgeColor(MonsterType t) => t switch
@@ -769,138 +1161,292 @@ namespace MonsterTamer
 
         private void DrawMovePanel(TamedMonster player)
         {
-            SplashKit.FillRectangle(SplashKit.RGBAColor(20, 35, 15, 230), 16, 336, 440, 200);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80), 16, 336, 440, 200);
+            // Panel: left half of bottom UI strip  (x=16, y=430 to x=572, y=708)
+            SplashKit.FillRectangle(SplashKit.RGBAColor(20, 35, 15, 230), 16, 430, 556, 278);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80),       16, 430, 556, 278);
             SplashKit.DrawText("Choose a move:",
-                SplashKit.RGBColor(180, 220, 180), "Arial", 11, 26, 346);
+                SplashKit.RGBColor(180, 220, 180), "Arial", 11, 26, 440);
 
             for (int i = 0; i < player.MoveSet.Length; i++)
             {
                 int col = i % 2, row = i / 2;
-                int bx  = 26 + col * 212, by = 362 + row * 84;
+                // 2-column grid: box w=260, h=110; column gap 12px; row gap 14px
+                int bx  = 26  + col * 272;
+                int by  = 456 + row * 126;
                 bool sel = (i == _player.SelectedMoveIndex);
 
                 SplashKit.FillRectangle(
                     sel ? SplashKit.RGBColor(50, 100, 40)
                         : SplashKit.RGBColor(25, 55, 20),
-                    bx, by, 200, 72);
+                    bx, by, 260, 110);
                 SplashKit.DrawRectangle(
                     sel ? SplashKit.RGBColor(255, 215, 0)
                         : SplashKit.RGBColor(80, 160, 60),
-                    bx, by, 200, 72);
+                    bx, by, 260, 110);
 
                 Move move = player.MoveSet[i];
-                Color nameCol = sel ? SplashKit.RGBColor(255, 215, 0)
-                                    : SplashKit.ColorWhite();
-                SplashKit.DrawText(move.Name,     nameCol, "Arial", 13, bx + 10, by + 10);
+                Color nameCol = sel ? SplashKit.RGBColor(255, 215, 0) : SplashKit.ColorWhite();
+
+                // Truncate name to fit inside box
+                string moveName = move.Name;
+                int nameLimit = move.Power > 0 ? 170 : 235;
+                while (moveName.Length > 3 && SplashKit.TextWidth(moveName, "Arial", 14) > nameLimit)
+                    moveName = moveName.Substring(0, moveName.Length - 4) + "...";
+                SplashKit.DrawText(moveName, nameCol, "Arial", 14, bx + 10, by + 12);
+
                 SplashKit.DrawText(move.GetMoveCategory(),
-                    SplashKit.RGBColor(160, 200, 160), "Arial", 11, bx + 10, by + 30);
-                DrawTypeBadge(move.MoveType, bx + 10, by + 48);
+                    SplashKit.RGBColor(160, 200, 160), "Arial", 11, bx + 10, by + 34);
+                DrawTypeBadge(move.MoveType, bx + 10, by + 58);
+
+                // Right-align PWR with 10px right margin
                 if (move.Power > 0)
-                    SplashKit.DrawText($"PWR {move.Power}",
-                        SplashKit.RGBColor(140, 180, 140), "Arial", 10, bx + 158, by + 52);
+                {
+                    string pwrText = $"PWR {move.Power}";
+                    int pwrW = SplashKit.TextWidth(pwrText, "Arial", 10);
+                    SplashKit.DrawText(pwrText,
+                        SplashKit.RGBColor(140, 180, 140), "Arial", 10, bx + 250 - pwrW, by + 62);
+                }
+            }
+
+            // Separator lines between move boxes
+            if (player.MoveSet.Length > 1)
+                SplashKit.DrawLine(SplashKit.RGBColor(50, 100, 40), 292, 456, 292, 692);
+            if (player.MoveSet.Length > 2)
+                SplashKit.DrawLine(SplashKit.RGBColor(50, 100, 40), 26, 574, 558, 574);
+        }
+
+        private void DrawItemPanel()
+        {
+            bool isWild = _battleManager?.WildTarget != null;
+            List<Item> items = _player.Bag.GetAllItems()
+                .Where(i => isWild || !(i is CaptureOrb))
+                .ToList();
+
+            SplashKit.FillRectangle(SplashKit.RGBAColor(15, 28, 50, 230), 16, 430, 556, 278);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 220),      16, 430, 556, 278);
+            SplashKit.DrawText("Bag:",
+                SplashKit.RGBColor(140, 200, 255), "Arial", 11, 26, 440);
+            SplashKit.DrawText("[C] Back",
+                SplashKit.RGBColor(100, 140, 180), "Arial", 10, 508, 440);
+
+            if (items.Count == 0)
+            {
+                SplashKit.DrawText("Bag is empty.",
+                    SplashKit.RGBColor(200, 140, 80), "Arial", 13, 220, 560);
+                return;
+            }
+
+            for (int i = 0; i < Math.Min(items.Count, 4); i++)
+            {
+                bool sel = (i == _selectedItemIndex);
+                int  col = i % 2, row = i / 2;
+                int  bx  = 26  + col * 272;
+                int  by  = 456 + row * 124;
+
+                SplashKit.FillRectangle(
+                    sel ? SplashKit.RGBColor(25, 58, 110)
+                        : SplashKit.RGBColor(15, 36, 70),
+                    bx, by, 260, 108);
+                SplashKit.DrawRectangle(
+                    sel ? SplashKit.RGBColor(0, 190, 255)
+                        : SplashKit.RGBColor(50, 100, 170),
+                    bx, by, 260, 108);
+
+                Item  item  = items[i];
+                Color nameC = sel ? SplashKit.RGBColor(0, 220, 255) : SplashKit.ColorWhite();
+                SplashKit.DrawText(item.Name, nameC, "Arial", 13, bx + 10, by + 12);
+                string desc = item.GetDescription();
+                if (desc.Length > 32) desc = desc.Substring(0, 29) + "...";
+                SplashKit.DrawText(desc,
+                    SplashKit.RGBColor(120, 170, 210), "Arial", 10, bx + 10, by + 38);
+                SplashKit.DrawText($"Rarity: {item.Rarity}",
+                    SplashKit.RGBColor(100, 140, 180), "Arial", 10, bx + 10, by + 60);
+            }
+
+            if (items.Count > 4)
+                SplashKit.DrawText($"... and {items.Count - 4} more",
+                    SplashKit.RGBColor(100, 140, 180), "Arial", 10, 26, 692);
+        }
+
+        private void DrawSwapPanel()
+        {
+            TamedMonster? active = _player.GetActiveMonster();
+
+            SplashKit.FillRectangle(SplashKit.RGBAColor(30, 15, 50, 230), 16, 430, 556, 278);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(160, 80, 220),      16, 430, 556, 278);
+            SplashKit.DrawText("Party — Send out:",
+                SplashKit.RGBColor(210, 160, 255), "Arial", 11, 26, 440);
+            SplashKit.DrawText("[X] Back",
+                SplashKit.RGBColor(140, 100, 180), "Arial", 10, 508, 440);
+
+            for (int i = 0; i < Math.Min(_player.Party.Count, 6); i++)
+            {
+                TamedMonster m      = _player.Party[i];
+                bool         sel    = (i == _selectedSwapIndex);
+                bool         isCurr = (m == active);
+                bool         isDead = !m.IsAlive;
+                int          col    = i % 2, row = i / 2;
+                int          bx     = 26  + col * 272;
+                int          by     = 456 + row * 78;
+
+                Color bg  = isDead  ? SplashKit.RGBColor(40, 15, 40)
+                          : isCurr  ? SplashKit.RGBColor(50, 25, 80)
+                          : sel     ? SplashKit.RGBColor(60, 25, 100)
+                                    : SplashKit.RGBColor(30, 12, 55);
+                Color brd = isDead  ? SplashKit.RGBColor(80, 40, 80)
+                          : isCurr  ? SplashKit.RGBColor(120, 80, 180)
+                          : sel     ? SplashKit.RGBColor(200, 120, 255)
+                                    : SplashKit.RGBColor(100, 60, 150);
+
+                SplashKit.FillRectangle(bg,  bx, by, 260, 66);
+                SplashKit.DrawRectangle(brd, bx, by, 260, 66);
+
+                Color nameC = isDead  ? SplashKit.RGBColor(100, 70, 100)
+                            : sel     ? SplashKit.RGBColor(210, 150, 255)
+                                      : SplashKit.ColorWhite();
+                string tag   = isCurr ? " [OUT]" : isDead ? " [FNT]" : "";
+                SplashKit.DrawText(m.Name + tag, nameC, "Arial", 12, bx + 10, by + 10);
+                SplashKit.DrawText($"Lv.{m.Level}   HP {m.Hp}/{m.MaxHp}",
+                    SplashKit.RGBColor(160, 130, 200), "Arial", 10, bx + 10, by + 34);
             }
         }
 
         private void DrawBattleLog()
         {
             if (_battleManager == null) return;
-            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 20, 8, 230), 464, 436, 320, 100);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 60), 464, 436, 320, 100);
+            int logX = 590, logY = 430, logW = ScreenW - 606, logH = 278;
+            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 20, 8, 230), logX, logY, logW, logH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 60),      logX, logY, logW, logH);
             SplashKit.DrawText("Battle log",
-                SplashKit.RGBColor(80, 130, 80), "Arial", 10, 474, 441);
+                SplashKit.RGBColor(80, 130, 80), "Arial", 10, logX + 10, logY + 8);
 
             List<string> log = _battleManager.BattleLog;
-            int start        = System.Math.Max(0, log.Count - 4);
-            for (int i = start; i < log.Count; i++)
+            int wrapW = logW - 22;
+            var wrapped = new List<string>();
+            foreach (string entry in log)
+                wrapped.AddRange(WrapText(entry, "Arial", 10, wrapW));
+
+            int maxLines = 9;
+            int wStart   = Math.Max(0, wrapped.Count - maxLines);
+            for (int i = wStart; i < wrapped.Count; i++)
             {
-                string entry = log[i].Length > 44 ? log[i].Substring(0, 44) + "..." : log[i];
-                float alpha  = 0.5f + (float)(i - start) / 4f * 0.5f;
-                int   a      = (int)(alpha * 255);
-                SplashKit.DrawText(entry,
+                float alpha = 0.45f + (float)(i - wStart) / maxLines * 0.55f;
+                int   a     = (int)(alpha * 255);
+                SplashKit.DrawText(wrapped[i],
                     SplashKit.RGBAColor(200, 220, 200, a), "Arial", 10,
-                    474, 455 + (i - start) * 20);
+                    logX + 10, logY + 26 + (i - wStart) * 26);
             }
+        }
+
+        private List<string> WrapText(string text, string font, int fontSize, int maxWidth)
+        {
+            var lines = new List<string>();
+            if (string.IsNullOrEmpty(text)) { lines.Add(""); return lines; }
+            string[] words   = text.Split(' ');
+            string   current = "";
+            foreach (string word in words)
+            {
+                string test = current.Length == 0 ? word : current + " " + word;
+                if (SplashKit.TextWidth(test, font, fontSize) <= maxWidth)
+                    current = test;
+                else
+                {
+                    if (current.Length > 0) lines.Add(current);
+                    current = word;
+                }
+            }
+            if (current.Length > 0) lines.Add(current);
+            if (lines.Count == 0)   lines.Add("");
+            return lines;
         }
 
         private void DrawPartyScreen()
         {
-            SplashKit.FillRectangle(SplashKit.RGBColor(10, 30, 10), 0, 0, 800, 600);
+            SplashKit.FillRectangle(SplashKit.RGBColor(10, 30, 10), 0, 0, ScreenW, ScreenH);
 
             SplashKit.DrawText("Party",
-                SplashKit.RGBColor(255, 215, 0), "Arial", 24, 360, 28);
-            SplashKit.DrawLine(SplashKit.RGBColor(45, 106, 79), 60, 56, 740, 56);
+                SplashKit.RGBColor(255, 215, 0), "Arial", 24, ScreenW / 2 - 30, 28);
+            SplashKit.DrawLine(SplashKit.RGBColor(45, 106, 79), 60, 62, ScreenW - 60, 62);
 
             for (int i = 0; i < _player.Party.Count; i++)
             {
-                TamedMonster m = _player.Party[i];
-                int py = 68 + i * 82;
+                TamedMonster m  = _player.Party[i];
+                int          py = 72 + i * 98;
+                int          pw = ScreenW - 160; // 1120
 
-                SplashKit.FillRectangle(
-                    SplashKit.RGBColor(18, 45, 18), 60, py, 680, 72);
-                SplashKit.DrawRectangle(
-                    SplashKit.RGBColor(80, 160, 80), 60, py, 680, 72);
+                SplashKit.FillRectangle(SplashKit.RGBColor(18, 45, 18),  80, py, pw, 90);
+                SplashKit.DrawRectangle(SplashKit.RGBColor(80, 160, 80),  80, py, pw, 90);
 
-                // Monster sprite (small)
-                DrawMonsterSprite(m.Name, 110, py + 40, false);
+                // Monster sprite
+                DrawMonsterSprite(m.Name, 140, py + 50, false, 65f);
 
                 SplashKit.DrawText($"{i+1}.  {m.Name}",
-                    SplashKit.ColorWhite(), "Arial", 16, 160, py + 12);
+                    SplashKit.ColorWhite(), "Arial", 16, 210, py + 14);
                 SplashKit.DrawText($"Lv.{m.Level}",
-                    SplashKit.RGBColor(116, 198, 157), "Arial", 13, 160, py + 34);
+                    SplashKit.RGBColor(116, 198, 157), "Arial", 13, 210, py + 38);
                 SplashKit.DrawText($"EXP: {m.Experience}",
-                    SplashKit.RGBColor(116, 198, 157), "Arial", 12, 240, py + 34);
+                    SplashKit.RGBColor(116, 198, 157), "Arial", 12, 310, py + 38);
                 SplashKit.DrawText(m.GetDescription(),
-                    SplashKit.RGBColor(120, 160, 120), "Arial", 11, 160, py + 54);
+                    SplashKit.RGBColor(120, 160, 120), "Arial", 11, 210, py + 62);
 
-                // HP bar
-                SplashKit.FillRectangle(SplashKit.RGBColor(40, 40, 40), 420, py + 20, 280, 12);
+                // HP bar — wider on larger screen
+                int barX = 600, barW2 = 540;
+                SplashKit.FillRectangle(SplashKit.RGBColor(40, 40, 40), barX, py + 20, barW2, 14);
                 float pct  = m.HpPercent;
-                Color barC = pct > 0.5f ? SplashKit.RGBColor(80, 220, 80)
+                Color barC = pct > 0.5f  ? SplashKit.RGBColor(80, 220, 80)
                            : pct > 0.25f ? SplashKit.RGBColor(240, 210, 40)
-                           : SplashKit.RGBColor(240, 60, 60);
-                SplashKit.FillRectangle(barC, 420, py + 20, (int)(280 * pct), 12);
-                SplashKit.DrawRectangle(SplashKit.RGBColor(80, 80, 80), 420, py + 20, 280, 12);
+                                         : SplashKit.RGBColor(240, 60, 60);
+                SplashKit.FillRectangle(barC, barX, py + 20, (int)(barW2 * pct), 14);
+                SplashKit.DrawRectangle(SplashKit.RGBColor(80, 80, 80), barX, py + 20, barW2, 14);
                 SplashKit.DrawText($"HP  {m.Hp} / {m.MaxHp}",
-                    SplashKit.RGBColor(160, 200, 160), "Arial", 11, 420, py + 38);
+                    SplashKit.RGBColor(160, 200, 160), "Arial", 11, barX, py + 42);
 
-                // Moves
+                // Moves — 4 across in one row
                 for (int mi = 0; mi < m.MoveSet.Length; mi++)
                 {
-                    int mx = 420 + (mi % 2) * 145;
-                    int my = py + 52 + (mi / 2) * 0;
+                    int mx = barX + (mi % 4) * 136;
+                    int my = py + 64;
                     SplashKit.DrawText($"· {m.MoveSet[mi].Name}",
                         SplashKit.RGBColor(140, 180, 140), "Arial", 10, mx, my);
                 }
             }
 
             SplashKit.DrawText("P or Enter to return",
-                SplashKit.RGBColor(100, 150, 100), "Arial", 12, 330, 564);
+                SplashKit.RGBColor(100, 150, 100), "Arial", 12, ScreenW / 2 - 80, ScreenH - 40);
         }
 
         private void DrawVictory()
         {
-            SplashKit.FillRectangle(SplashKit.RGBColor(5, 20, 5), 0, 0, 800, 600);
-            SplashKit.FillEllipse(SplashKit.RGBAColor(255, 215, 0, 30), 300, 200, 200, 200);
+            SplashKit.FillRectangle(SplashKit.RGBColor(5, 20, 5), 0, 0, ScreenW, ScreenH);
+            SplashKit.FillEllipse(SplashKit.RGBAColor(255, 215, 0, 30),
+                ScreenW / 2 - 100, ScreenH / 2 - 100, 200, 200);
             SplashKit.DrawText("Victory!",
-                SplashKit.RGBColor(255, 215, 0), "Arial", 56, 255, 210);
+                SplashKit.RGBColor(255, 215, 0), "Arial", 56, ScreenW / 2 - 175, ScreenH / 2 - 80);
             SplashKit.DrawText("You are the Guardian of Sarawak!",
-                SplashKit.ColorWhite(), "Arial", 20, 195, 290);
+                SplashKit.ColorWhite(), "Arial", 20, ScreenW / 2 - 185, ScreenH / 2 + 0);
             SplashKit.DrawText("Naga Belian has been defeated.",
-                SplashKit.RGBColor(116, 198, 157), "Arial", 14, 280, 322);
+                SplashKit.RGBColor(116, 198, 157), "Arial", 14, ScreenW / 2 - 160, ScreenH / 2 + 32);
             SplashKit.DrawText("Press Enter to exit",
-                SplashKit.RGBColor(100, 150, 100), "Arial", 12, 320, 390);
+                SplashKit.RGBColor(100, 150, 100), "Arial", 12, ScreenW / 2 - 85, ScreenH / 2 + 95);
         }
 
         private void DrawGameOver()
         {
-            SplashKit.FillRectangle(SplashKit.RGBColor(20, 5, 5), 0, 0, 800, 600);
-            SplashKit.DrawText("Defeated!",
-                SplashKit.RGBColor(220, 60, 60), "Arial", 56, 250, 210);
-            SplashKit.DrawText("All your monsters have fainted...",
-                SplashKit.RGBColor(200, 180, 180), "Arial", 18, 225, 290);
-            SplashKit.DrawText("Press Enter to exit",
-                SplashKit.RGBColor(120, 100, 100), "Arial", 12, 320, 360);
+            SplashKit.FillRectangle(SplashKit.RGBColor(20, 5, 5), 0, 0, ScreenW, ScreenH);
+
+            string title    = "Defeated!";
+            string subtitle = "All your monsters have fainted...";
+            string prompt   = "Press Enter to exit";
+
+            SplashKit.DrawText(title,
+                SplashKit.RGBColor(220, 60, 60), "Arial", 56,
+                ScreenW / 2 - SplashKit.TextWidth(title,    "Arial", 56) / 2, ScreenH / 2 - 80);
+            SplashKit.DrawText(subtitle,
+                SplashKit.RGBColor(200, 180, 180), "Arial", 18,
+                ScreenW / 2 - SplashKit.TextWidth(subtitle, "Arial", 18) / 2, ScreenH / 2);
+            SplashKit.DrawText(prompt,
+                SplashKit.RGBColor(120, 100, 100), "Arial", 12,
+                ScreenW / 2 - SplashKit.TextWidth(prompt,   "Arial", 12) / 2, ScreenH / 2 + 65);
         }
     }
 }

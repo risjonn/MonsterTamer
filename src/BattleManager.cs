@@ -10,6 +10,8 @@ namespace MonsterTamer
         private int            _turnNumber;
         private List<string>   _battleLog;
         private WildMonster?   _wildTarget;  // set if battling a wild monster
+        private BossMonster?   _bossTarget;  // set if battling the final boss
+        private string         _lastPlayerMonsterName = "";
 
         public BattleManager(PlayerTrainer player, Trainer opponent)
         {
@@ -20,24 +22,36 @@ namespace MonsterTamer
             _battleLog  = new List<string>();
         }
 
-        public BattleResult   Result     => _result;
-        public List<string>   BattleLog  => _battleLog;
-        public int            TurnNumber => _turnNumber;
-        public Trainer        Opponent   => _opponent;
+        public BattleResult   Result                  => _result;
+        public List<string>   BattleLog               => _battleLog;
+        public int            TurnNumber              => _turnNumber;
+        public Trainer        Opponent                => _opponent;
+        public string         LastPlayerMonsterName   => _lastPlayerMonsterName;
         public WildMonster?   WildTarget
         {
             get => _wildTarget;
             set => _wildTarget = value;
         }
+        public BossMonster?   BossTarget
+        {
+            get => _bossTarget;
+            set => _bossTarget = value;
+        }
+
+        // Unified enemy reference — eliminates repeated null-coalescing chains
+        public Monster?       EnemyMonster =>
+            (Monster?)_wildTarget ?? (Monster?)_bossTarget ?? _opponent.GetActiveMonster();
 
         // Executes the player's chosen move
         public string PlayerTurn(int moveIndex)
         {
             TamedMonster? attacker = _player.GetActiveMonster();
-            Monster?      defender = _opponent.GetActiveMonster() ?? (Monster?)_wildTarget;
+            Monster?      defender = EnemyMonster;
 
             if (attacker == null || defender == null)
                 return "No active monsters!";
+
+            _lastPlayerMonsterName = attacker.Name;
 
             if (moveIndex < 0 || moveIndex >= attacker.MoveSet.Length)
                 return "Invalid move!";
@@ -45,12 +59,15 @@ namespace MonsterTamer
             // Apply status before moving
             ApplyStatusEffect(attacker);
 
-            // Frozen/Paralysed may skip turn
+            // Status conditions may skip turn
             if (attacker.Status == StatusCondition.Frozen)
             {
                 attacker.Status = StatusCondition.None;
-                return $"{attacker.Name} is frozen and cannot move!";
+                return $"{attacker.Name} thawed out and cannot move this turn!";
             }
+            if (attacker.Status == StatusCondition.Paralysed &&
+                new System.Random().NextDouble() < 0.5)
+                return $"{attacker.Name} is paralysed and couldn't move!";
 
             Move   selectedMove = attacker.MoveSet[moveIndex];
             string result       = selectedMove.Execute(attacker, defender);
@@ -61,37 +78,73 @@ namespace MonsterTamer
         // Executes the AI opponent's turn using Strategy Pattern
         public string EnemyTurn()
         {
-            Monster?      attacker = _opponent.GetActiveMonster() ?? (Monster?)_wildTarget;
             TamedMonster? defender = _player.GetActiveMonster();
+            if (defender == null) return "";
+            _lastPlayerMonsterName = defender.Name;
 
-            if (attacker == null || defender == null)
-                return "";
-
-            BattleState state = new BattleState(
-                defender, attacker, _turnNumber, false
-            );
-
-            Move[] moveset;
-            int    moveIndex = 0;
+            Move[]  moveset;
+            int     moveIndex = 0;
+            Monster attacker;
 
             if (_wildTarget != null)
             {
+                attacker  = _wildTarget;
                 moveset   = _wildTarget.MoveSet;
                 moveIndex = new System.Random().Next(moveset.Length);
             }
+            else if (_bossTarget != null)
+            {
+                _bossTarget.UpdatePhase();
+                attacker = _bossTarget;
+                moveset  = _bossTarget.MoveSet;
+                // Type-advantage selection — boss uses smarter AI than random
+                float best = -1f;
+                for (int i = 0; i < moveset.Length; i++)
+                {
+                    float mult = TypeChart.GetMultiplier(moveset[i].MoveType, defender.PrimaryType);
+                    if (defender.HasDualType)
+                        mult *= TypeChart.GetMultiplier(moveset[i].MoveType, defender.SecondaryType);
+                    if (mult > best) { best = mult; moveIndex = i; }
+                }
+            }
             else
             {
+                Monster? enemyMonster = _opponent.GetActiveMonster();
+                if (enemyMonster == null) return "";
+                BattleState state = new BattleState(defender, enemyMonster, _turnNumber, false);
                 _opponent.ChooseAction(state);
                 TamedMonster? enemyActive = _opponent.GetActiveMonster();
                 if (enemyActive == null) return "";
+                attacker  = enemyActive;
                 moveset   = enemyActive.MoveSet;
                 moveIndex = (_opponent is AITrainer ai) ? ai.SelectedMoveIndex : 0;
-                attacker  = enemyActive;
+            }
+
+            // Apply burn/poison damage and check for skip conditions
+            ApplyStatusEffect(attacker);
+            if (attacker.Status == StatusCondition.Frozen)
+            {
+                attacker.Status = StatusCondition.None;
+                string thaw = $"{attacker.Name} thawed out and lost its turn!";
+                _battleLog.Add(thaw);
+                return thaw;
+            }
+            if (attacker.Status == StatusCondition.Paralysed &&
+                new System.Random().NextDouble() < 0.5)
+            {
+                string para = $"{attacker.Name} is paralysed and couldn't move!";
+                _battleLog.Add(para);
+                return para;
             }
 
             string result = moveset[moveIndex].Execute(attacker, defender);
             _battleLog.Add(result);
             return result;
+        }
+
+        public void Flee()
+        {
+            _result = BattleResult.PlayerFled;
         }
 
         // Attempts to catch the wild monster
@@ -116,13 +169,12 @@ namespace MonsterTamer
                 return true;
             }
 
-            Monster? enemyActive = _opponent.GetActiveMonster() ?? (Monster?)_wildTarget;
+            Monster? enemyActive = EnemyMonster;
             if (enemyActive == null || !enemyActive.IsAlive)
             {
                 _result = BattleResult.PlayerWon;
-                // Grant experience
                 if (_player.GetActiveMonster() is TamedMonster winner)
-                    winner.GainExperience(50 * _turnNumber);
+                    winner.GainExperience(_bossTarget != null ? 500 : 50 * _turnNumber);
                 return true;
             }
 

@@ -5,7 +5,7 @@ namespace MonsterTamer
     // Caller never needs to know constructor details
     public static class MonsterFactory
     {
-        private static TamedMonster Tame(WildMonster monster)
+        public static TamedMonster Tame(WildMonster monster)
         {
             return monster.HasDualType
                 ? new TamedMonster(

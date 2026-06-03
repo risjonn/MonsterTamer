@@ -113,9 +113,18 @@ namespace MonsterTamer
         private float _camX;
         private float _camY;
 
-        // Encounter cooldown — prevents instant re-trigger
+        // Encounter cooldown and tile tracking
         private int _encounterCooldown;
+        private int _lastTileX   = -1;
+        private int _lastTileY   = -1;
         private static Random _rng = new Random();
+
+        // Exit fade transition
+        private bool _exitFading    = false;
+        private int  _exitFadeAlpha = 0;
+
+        // Cleared state
+        private bool _isCleared = false;
 
         // Events
         public bool         WildEncounterTriggered { get; private set; }
@@ -126,35 +135,49 @@ namespace MonsterTamer
         public OverworldPlayer Player => _player;
 
         public OverworldMap(string regionName, int[,] mapData,
-                            List<TrainerNPC> trainers, bool hasExit = false)
+                            List<TrainerNPC> trainers, bool hasExit = false,
+                            int spawnTileX = 12, int spawnTileY = 10)
         {
             _regionName = regionName;
             _trainers   = trainers;
             _hasExit    = hasExit;
             _tiles      = new Tile[MapWidth, MapHeight];
 
-            // Parse map data
             for (int y = 0; y < MapHeight; y++)
                 for (int x = 0; x < MapWidth; x++)
                     _tiles[x, y] = new Tile((TileType)mapData[y, x]);
 
-            // Place player on a walkable tile — scan from centre outward
-            _player = new OverworldPlayer(12 * TileSize, 10 * TileSize);
-            PlacePlayerOnWalkableTile();
+            _player = new OverworldPlayer(spawnTileX * TileSize, spawnTileY * TileSize);
+            PlacePlayerOnWalkableTile(spawnTileX, spawnTileY);
             _encounterCooldown = 0;
         }
 
-        private void PlacePlayerOnWalkableTile()
+        public void SetCleared(bool cleared) { _isCleared = cleared; }
+
+        public void ApplyFleeingCooldown() { _encounterCooldown = 300; } // 5 s at 60fps
+
+        public void MarkTrainerDefeated(AITrainer trainer)
         {
-            // Search outward from centre until we find a walkable tile
+            foreach (TrainerNPC npc in _trainers)
+            {
+                if (npc.Trainer == trainer)
+                {
+                    npc.Defeated = true;
+                    break;
+                }
+            }
+        }
+
+        private void PlacePlayerOnWalkableTile(int startTileX = 12, int startTileY = 10)
+        {
             for (int radius = 0; radius < 10; radius++)
             {
                 for (int dy = -radius; dy <= radius; dy++)
                 {
                     for (int dx = -radius; dx <= radius; dx++)
                     {
-                        int tx = 12 + dx;
-                        int ty = 10 + dy;
+                        int tx = startTileX + dx;
+                        int ty = startTileY + dy;
                         if (tx < 0 || tx >= MapWidth || ty < 0 || ty >= MapHeight) continue;
                         if (_tiles[tx, ty].Walkable)
                         {
@@ -174,6 +197,18 @@ namespace MonsterTamer
             TriggeredTrainer          = null;
 
             if (_encounterCooldown > 0) _encounterCooldown--;
+
+            // Advance exit fade; freeze input during transition
+            if (_exitFading)
+            {
+                _exitFadeAlpha = Math.Min(255, _exitFadeAlpha + 8);
+                if (_exitFadeAlpha >= 255)
+                {
+                    RegionExitTriggered = true;
+                    _exitFading = false;
+                }
+                return;
+            }
 
             float speed = 2.0f;
             float dx = 0, dy = 0;
@@ -221,25 +256,29 @@ namespace MonsterTamer
             if (tileX < 0 || tileX >= MapWidth || tileY < 0 || tileY >= MapHeight)
                 return;
 
-            TileType current = _tiles[tileX, tileY].Type;
+            TileType current  = _tiles[tileX, tileY].Type;
+            bool     newTile  = (tileX != _lastTileX || tileY != _lastTileY);
+            _lastTileX = tileX;
+            _lastTileY = tileY;
 
-            // Tall grass — random encounter chance
-            if (current == TileType.TallGrass && _encounterCooldown == 0)
+            // Tall grass — 15% chance per new tile entered (was 4% per frame)
+            if (current == TileType.TallGrass && newTile && _encounterCooldown == 0)
             {
-                if (_rng.NextDouble() < 0.04) // 4% per frame in tall grass
+                if (_rng.NextDouble() < 0.15)
                 {
                     WildEncounterTriggered = true;
-                    _encounterCooldown     = 120; // 2 second cooldown
+                    _encounterCooldown     = 60; // 1 second cooldown
                 }
             }
 
-            // Region exit
-            if (current == TileType.RegionExit)
+            // Region exit — begin fade transition instead of instant trigger
+            if (current == TileType.RegionExit && !_exitFading)
             {
-                RegionExitTriggered = true;
+                _exitFading    = true;
+                _exitFadeAlpha = 0;
             }
 
-            // Trainer spots
+            // Trainer spots — only trigger when cooldown is clear
             foreach (TrainerNPC npc in _trainers)
             {
                 if (npc.Defeated) continue;
@@ -247,48 +286,75 @@ namespace MonsterTamer
                     MathF.Pow(_player.X - npc.X, 2) +
                     MathF.Pow(_player.Y - npc.Y, 2)
                 );
-                if (dist < TileSize * 1.5f)
+                if (dist < TileSize * 1.5f && _encounterCooldown == 0)
                 {
                     TrainerEncounterTriggered = true;
                     TriggeredTrainer          = npc.Trainer;
-                    npc.Defeated              = true;
+                    _encounterCooldown        = 60; // prevent immediate re-trigger; overwritten by ApplyFleeingCooldown on run
                     break;
                 }
             }
         }
 
+        // Screen constants matching GameManager.ScreenW / ScreenH
+        private const int ScreenW = 1280;
+        private const int ScreenH = 720;
+
         private void UpdateCamera()
         {
-            int screenW = 800;
-            int screenH = 600;
+            float mapPixW = MapWidth  * TileSize; // 800
+            float mapPixH = MapHeight * TileSize; // 640
 
-            _camX = _player.X - screenW / 2 + OverworldPlayer.Size / 2;
-            _camY = _player.Y - screenH / 2 + OverworldPlayer.Size / 2;
+            // When the map fits, use scale-to-fill in Draw — no camera offset needed
+            if (mapPixW <= ScreenW)
+            {
+                _camX = 0;
+            }
+            else
+            {
+                _camX = _player.X - ScreenW / 2f + OverworldPlayer.Size / 2f;
+                float maxCamX = mapPixW - ScreenW;
+                if (_camX < 0)       _camX = 0;
+                if (_camX > maxCamX) _camX = maxCamX;
+            }
 
-            float maxCamX = MapWidth  * TileSize - screenW;
-            float maxCamY = MapHeight * TileSize - screenH;
-
-            if (_camX < 0)       _camX = 0;
-            if (_camY < 0)       _camY = 0;
-            if (_camX > maxCamX) _camX = maxCamX;
-            if (_camY > maxCamY) _camY = maxCamY;
+            if (mapPixH <= ScreenH)
+            {
+                _camY = 0;
+            }
+            else
+            {
+                _camY = _player.Y - ScreenH / 2f + OverworldPlayer.Size / 2f;
+                float maxCamY = mapPixH - ScreenH;
+                if (_camY < 0)       _camY = 0;
+                if (_camY > maxCamY) _camY = maxCamY;
+            }
         }
 
         public void Draw(Window window)
         {
+            // Scale tiles to fill the full window (25×20 map = 800×640 < 1280×720)
+            float mapPixW = MapWidth  * TileSize;
+            float mapPixH = MapHeight * TileSize;
+            float scaleX  = mapPixW < ScreenW ? (float)ScreenW / mapPixW : 1f; // 1.6
+            float scaleY  = mapPixH < ScreenH ? (float)ScreenH / mapPixH : 1f; // 1.125
+            float drawW   = TileSize * scaleX;   // tile draw width  ≈ 51.2
+            float drawH   = TileSize * scaleY;   // tile draw height = 36.0
+            float spriteS = MathF.Min(scaleX, scaleY); // proportional sprite scale
+
+            // Camera offset in draw-space (0 when map fits and scaling fills window)
+            float offX = mapPixW < ScreenW ? 0f : _camX * scaleX;
+            float offY = mapPixH < ScreenH ? 0f : _camY * scaleY;
+
             // Draw tiles
             for (int y = 0; y < MapHeight; y++)
             {
                 for (int x = 0; x < MapWidth; x++)
                 {
-                    float screenX = x * TileSize - _camX;
-                    float screenY = y * TileSize - _camY;
-
-                    // Skip off-screen tiles
-                    if (screenX < -TileSize || screenX > 832 ||
-                        screenY < -TileSize || screenY > 632) continue;
-
-                    DrawTile(_tiles[x, y].Type, screenX, screenY);
+                    float screenX = x * drawW - offX;
+                    float screenY = y * drawH - offY;
+                    if (screenX < -drawW || screenX > ScreenW || screenY < -drawH || screenY > ScreenH) continue;
+                    DrawTile(_tiles[x, y].Type, screenX, screenY, drawW, drawH);
                 }
             }
 
@@ -296,179 +362,218 @@ namespace MonsterTamer
             foreach (TrainerNPC npc in _trainers)
             {
                 if (npc.Defeated) continue;
-                float sx = npc.X - _camX;
-                float sy = npc.Y - _camY;
-                if (sx < -32 || sx > 832 || sy < -32 || sy > 632) continue;
-                DrawTrainerNPC(sx, sy, npc.Label);
+                float sx = npc.X * scaleX - offX;
+                float sy = npc.Y * scaleY - offY;
+                if (sx < -32 || sx > ScreenW + 32 || sy < -32 || sy > ScreenH + 32) continue;
+                DrawTrainerNPC(sx, sy, npc.Label, spriteS);
             }
 
             // Draw player
-            float px = _player.X - _camX;
-            float py = _player.Y - _camY;
-            DrawPlayerSprite(px, py, _player.Direction, _player.AnimFrame);
+            float px = _player.X * scaleX - offX;
+            float py = _player.Y * scaleY - offY;
+            DrawPlayerSprite(px, py, _player.Direction, _player.AnimFrame, spriteS);
 
             // Draw HUD overlay
             DrawHUD(window);
+
+            // Fade-to-black overlay during region exit transition
+            if (_exitFadeAlpha > 0)
+                SplashKit.FillRectangle(SplashKit.RGBAColor(0, 0, 0, _exitFadeAlpha), 0, 0, ScreenW, ScreenH);
         }
 
-        private void DrawTile(TileType type, float x, float y)
+        private void DrawTile(TileType type, float x, float y, float w, float h)
         {
-            float s = TileSize;
+            // rx/ry scale internal offsets proportionally to the drawn tile size
+            float rx = w / TileSize;
+            float ry = h / TileSize;
+            float cr = MathF.Min(w, h) * 0.45f; // circle radius for Tree
             switch (type)
             {
                 case TileType.Grass:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(76, 153, 0),   x, y, s, s);
-                    SplashKit.DrawRectangle(SplashKit.RGBColor(60, 130, 0),   x, y, s, s);
+                    SplashKit.FillRectangle(SplashKit.RGBColor(76, 153, 0),  x, y, w, h);
+                    SplashKit.DrawRectangle(SplashKit.RGBColor(60, 130, 0),  x, y, w, h);
                     break;
 
                 case TileType.TallGrass:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(34, 120, 15),  x, y, s, s);
-                    // Tall grass tufts
+                    SplashKit.FillRectangle(SplashKit.RGBColor(34, 120, 15), x, y, w, h);
                     SplashKit.FillTriangle(SplashKit.RGBColor(50, 160, 20),
-                        x+4,  y+s, x+8,  y+s-10, x+12, y+s);
+                        x+ 4*rx, y+h, x+ 8*rx, y+h-10*ry, x+12*rx, y+h);
                     SplashKit.FillTriangle(SplashKit.RGBColor(50, 160, 20),
-                        x+14, y+s, x+18, y+s-12, x+22, y+s);
+                        x+14*rx, y+h, x+18*rx, y+h-12*ry, x+22*rx, y+h);
                     SplashKit.FillTriangle(SplashKit.RGBColor(60, 180, 25),
-                        x+9,  y+s, x+13, y+s-14, x+17, y+s);
-                    SplashKit.DrawRectangle(SplashKit.RGBColor(28, 100, 10),  x, y, s, s);
+                        x+ 9*rx, y+h, x+13*rx, y+h-14*ry, x+17*rx, y+h);
+                    SplashKit.DrawRectangle(SplashKit.RGBColor(28, 100, 10), x, y, w, h);
                     break;
 
                 case TileType.Tree:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(20, 80, 0),    x, y, s, s);
+                    SplashKit.FillRectangle(SplashKit.RGBColor(20, 80, 0),   x, y, w, h);
                     SplashKit.FillCircle(SplashKit.RGBColor(30, 120, 10),
-                        x + s/2, y + s/2, s * 0.45f);
+                        x + w/2, y + h/2, cr);
                     SplashKit.FillCircle(SplashKit.RGBColor(40, 150, 15),
-                        x + s/2 - 4, y + s/2 - 4, s * 0.3f);
+                        x + w/2 - 4*rx, y + h/2 - 4*ry, cr * 0.65f);
                     break;
 
                 case TileType.Water:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(30, 144, 255), x, y, s, s);
+                    SplashKit.FillRectangle(SplashKit.RGBColor(30, 144, 255), x, y, w, h);
                     SplashKit.DrawLine(SplashKit.RGBColor(100, 180, 255),
-                        x+4, y+s*0.4f, x+s-4, y+s*0.4f);
+                        x+4*rx, y+h*0.4f, x+w-4*rx, y+h*0.4f);
                     SplashKit.DrawLine(SplashKit.RGBColor(100, 180, 255),
-                        x+4, y+s*0.65f, x+s-4, y+s*0.65f);
+                        x+4*rx, y+h*0.65f, x+w-4*rx, y+h*0.65f);
                     break;
 
                 case TileType.Path:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(210, 180, 120), x, y, s, s);
-                    SplashKit.DrawRectangle(SplashKit.RGBColor(180, 150, 90),  x, y, s, s);
+                    SplashKit.FillRectangle(SplashKit.RGBColor(210, 180, 120), x, y, w, h);
+                    SplashKit.DrawRectangle(SplashKit.RGBColor(180, 150, 90),  x, y, w, h);
                     break;
 
                 case TileType.TrainerSpot:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(210, 180, 120), x, y, s, s);
+                    SplashKit.FillRectangle(SplashKit.RGBColor(210, 180, 120), x, y, w, h);
                     break;
 
                 case TileType.RegionExit:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(255, 215, 0),  x, y, s, s);
-                    SplashKit.DrawRectangle(SplashKit.RGBColor(200, 160, 0),   x, y, s, s);
-                    SplashKit.DrawText("EXIT",
-                        SplashKit.RGBColor(100, 60, 0), "Arial", 8, x+6, y+12);
+                    if (_isCleared)
+                    {
+                        bool pulse = (SplashKit.TimerTicks("blink") % 600) < 350;
+                        SplashKit.FillRectangle(
+                            pulse ? SplashKit.RGBColor(255, 235, 0) : SplashKit.RGBColor(210, 170, 0),
+                            x, y, w, h);
+                        SplashKit.DrawRectangle(SplashKit.RGBColor(255, 255, 100), x, y, w, h);
+                        SplashKit.DrawText("EXIT", SplashKit.RGBColor(60, 30, 0), "Arial", 8,
+                            x+4*rx, y+6*ry);
+                        SplashKit.FillTriangle(SplashKit.RGBColor(60, 30, 0),
+                            x+w/2-6*rx, y+18*ry, x+w/2+6*rx, y+18*ry, x+w/2, y+28*ry);
+                    }
+                    else
+                    {
+                        SplashKit.FillRectangle(SplashKit.RGBColor(180, 150, 0), x, y, w, h);
+                        SplashKit.DrawRectangle(SplashKit.RGBColor(130, 100, 0), x, y, w, h);
+                        SplashKit.DrawText("EXIT", SplashKit.RGBColor(80, 50, 0), "Arial", 8,
+                            x+6*rx, y+12*ry);
+                    }
                     break;
 
                 case TileType.House:
-                    SplashKit.FillRectangle(SplashKit.RGBColor(180, 100, 60), x, y, s, s);
+                    SplashKit.FillRectangle(SplashKit.RGBColor(180, 100, 60), x, y, w, h);
                     SplashKit.FillTriangle(SplashKit.RGBColor(150, 60, 40),
-                        x, y, x+s, y, x+s/2, y-s*0.4f);
+                        x, y, x+w, y, x+w/2, y-h*0.4f);
                     break;
             }
         }
 
-        private void DrawPlayerSprite(float x, float y, int dir, int frame)
+        private void DrawPlayerSprite(float x, float y, int dir, int frame, float scale = 1.0f)
         {
-            float s = OverworldPlayer.Size;
+            float os = OverworldPlayer.Size; // original size constant
+            float s  = os * scale;           // scaled size
 
             // Body
             SplashKit.FillRectangle(SplashKit.RGBColor(70, 130, 180),
-                x + 4, y + 10, s - 8, s - 10);
+                x + 4*scale, y + 10*scale, (os-8)*scale, (os-10)*scale);
 
             // Head
             SplashKit.FillCircle(SplashKit.RGBColor(255, 200, 150),
-                x + s/2, y + 8, 8);
+                x + s/2, y + 8*scale, 8*scale);
 
             // Hat
             SplashKit.FillRectangle(SplashKit.RGBColor(34, 85, 34),
-                x + 3, y + 2, s - 6, 5);
+                x + 3*scale, y + 2*scale, (os-6)*scale, 5*scale);
             SplashKit.FillRectangle(SplashKit.RGBColor(34, 85, 34),
-                x + 6, y - 1, s - 12, 5);
+                x + 6*scale, y - scale, (os-12)*scale, 5*scale);
 
             // Legs — animated
             if (frame == 0)
             {
                 SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + 5, y + s - 8, 6, 8);
+                    x + 5*scale, y + (os-8)*scale, 6*scale, 8*scale);
                 SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + s - 11, y + s - 6, 6, 6);
+                    x + (os-11)*scale, y + (os-6)*scale, 6*scale, 6*scale);
             }
             else
             {
                 SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + 5, y + s - 6, 6, 6);
+                    x + 5*scale, y + (os-6)*scale, 6*scale, 6*scale);
                 SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + s - 11, y + s - 8, 6, 8);
+                    x + (os-11)*scale, y + (os-8)*scale, 6*scale, 8*scale);
             }
 
             // Eyes based on direction
             if (dir == 0) // down
             {
-                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 - 3, y + 8, 2);
-                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 + 3, y + 8, 2);
+                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 - 3*scale, y + 8*scale, 2*scale);
+                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 + 3*scale, y + 8*scale, 2*scale);
             }
             else if (dir == 1) // up — no eyes visible
             {
             }
             else // left or right — one eye
             {
-                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2, y + 8, 2);
+                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2, y + 8*scale, 2*scale);
             }
         }
 
-        private void DrawTrainerNPC(float x, float y, string label)
+        private void DrawTrainerNPC(float x, float y, string label, float scale = 1.0f)
         {
-            float s = OverworldPlayer.Size;
+            float os = OverworldPlayer.Size;
+            float s  = os * scale;
 
             // Body
             SplashKit.FillRectangle(SplashKit.RGBColor(180, 60, 60),
-                x + 4, y + 10, s - 8, s - 10);
+                x + 4*scale, y + 10*scale, (os-8)*scale, (os-10)*scale);
 
             // Head
             SplashKit.FillCircle(SplashKit.RGBColor(255, 200, 150),
-                x + s/2, y + 8, 8);
+                x + s/2, y + 8*scale, 8*scale);
 
             // Hat
             SplashKit.FillRectangle(SplashKit.RGBColor(120, 30, 30),
-                x + 3, y + 2, s - 6, 5);
+                x + 3*scale, y + 2*scale, (os-6)*scale, 5*scale);
 
             // Eyes
-            SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 - 3, y + 8, 2);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 + 3, y + 8, 2);
+            SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 - 3*scale, y + 8*scale, 2*scale);
+            SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 + 3*scale, y + 8*scale, 2*scale);
 
             // Exclamation mark above
             SplashKit.DrawText("!", SplashKit.RGBColor(255, 215, 0), "Arial", 14,
-                x + s/2 - 3, y - 16);
+                x + s/2 - 3*scale, y - 16*scale);
 
             // Name label
             SplashKit.DrawText(label, SplashKit.RGBColor(255, 255, 255), "Arial", 9,
-                x - 10, y - 28);
+                x - 10, y - 28*scale);
         }
 
         private void DrawHUD(Window window)
         {
-            // Top-left HUD — region info
-            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200), 8, 8, 220, 64);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(74, 198, 100), 8, 8, 220, 64);
+            // Top-left HUD — expand slightly when cleared to fit badge
+            int hudH = _isCleared ? 82 : 64;
+            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200), 8, 8, 220, hudH);
+            SplashKit.DrawRectangle(
+                _isCleared ? SplashKit.RGBColor(0, 255, 100) : SplashKit.RGBColor(74, 198, 100),
+                8, 8, 220, hudH);
             SplashKit.DrawText(_regionName,
                 SplashKit.RGBColor(255, 215, 0), "Arial", 14, 18, 18);
-            SplashKit.DrawText("Walk into tall grass to encounter monsters",
-                SplashKit.RGBColor(160, 220, 160), "Arial", 9, 18, 38);
-            SplashKit.DrawText("Walk into a trainer (!) to battle",
-                SplashKit.RGBColor(160, 220, 160), "Arial", 9, 18, 52);
+
+            if (_isCleared)
+            {
+                // Green "CLEARED" badge
+                SplashKit.FillRectangle(SplashKit.RGBColor(0, 160, 70), 18, 38, 200, 22);
+                SplashKit.DrawRectangle(SplashKit.RGBColor(0, 255, 100), 18, 38, 200, 22);
+                SplashKit.DrawText("REGION CLEARED!",
+                    SplashKit.ColorWhite(), "Arial", 11, 24, 42);
+                SplashKit.DrawText("Walk to the EXIT tile to continue",
+                    SplashKit.RGBColor(160, 255, 160), "Arial", 9, 18, 68);
+            }
+            else
+            {
+                SplashKit.DrawText("Tall grass — wild encounters",
+                    SplashKit.RGBColor(160, 220, 160), "Arial", 9, 18, 38);
+                SplashKit.DrawText("Walk into a trainer (!) to battle",
+                    SplashKit.RGBColor(160, 220, 160), "Arial", 9, 18, 52);
+            }
 
             // Bottom controls bar
-            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200),
-                0, 572, 800, 28);
+            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200), 0, ScreenH - 28, ScreenW, 28);
             SplashKit.DrawText(
                 "WASD / Arrow keys: move     P: party screen     Esc: menu",
-                SplashKit.RGBColor(160, 220, 160), "Arial", 10, 155, 580);
+                SplashKit.RGBColor(160, 220, 160), "Arial", 10, ScreenW / 2 - 230, ScreenH - 20);
         }
     }
 
@@ -510,7 +615,7 @@ namespace MonsterTamer
                 {T,T,T,T,T,G,G,G,G,G,G,G,P,X,X,X,P,G,G,G,T,T,T,T,T},
                 {T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T},
             };
-            return new OverworldMap("Rainforest", map, trainers, hasExit: true);
+            return new OverworldMap("Rainforest", map, trainers, hasExit: true, spawnTileX: 4, spawnTileY: 2);
         }
 
         public static OverworldMap CreateRiverDeltaMap(List<TrainerNPC> trainers)
@@ -538,7 +643,7 @@ namespace MonsterTamer
                 {T,T,T,T,T,G,G,G,G,G,G,G,G,G,X,G,G,T,T,T,T,T,T,T,T},
                 {T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T},
             };
-            return new OverworldMap("River Delta", map, trainers, hasExit: true);
+            return new OverworldMap("River Delta", map, trainers, hasExit: true, spawnTileX: 2, spawnTileY: 2);
         }
 
         public static OverworldMap CreateHighlandsMap(List<TrainerNPC> trainers)
@@ -566,7 +671,7 @@ namespace MonsterTamer
                 {T,T,T,T,T,T,G,G,G,G,G,G,P,X,P,G,G,T,T,T,T,T,T,T,T},
                 {T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T},
             };
-            return new OverworldMap("Ancient Highlands", map, trainers, hasExit: false);
+            return new OverworldMap("Ancient Highlands", map, trainers, hasExit: false, spawnTileX: 2, spawnTileY: 2);
         }
     }
 }
