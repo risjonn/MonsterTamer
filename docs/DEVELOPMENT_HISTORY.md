@@ -268,6 +268,36 @@ Goal:
   - Preserve existing functionality and animations
 
 
+### 5.6 Status condition logic fix
+
+- [x] **Paralysed**:
+  - 50% chance to skip the turn entirely
+  - Show "X is paralysed and cannot move!"
+  - Do not execute the selected move if the turn is skipped
+- [x] **Frozen**:
+  - Always skip the next turn
+  - Show "X is frozen solid!"
+  - Clear the status after the skipped turn
+- [x] **Burned**:
+  - Deal 10% max HP damage at the start of the turn
+  - Reduce attack power by 25%
+  - Show "X is hurt by its burn!"
+- [x] **Poisoned**:
+  - Deal 8% max HP damage at the start of the turn
+  - Show "X is hurt by poison!"
+- [x] Apply status effects before the monster acts
+- [x] Ensure skipped turns do not execute moves
+- [x] Improve battle log readability:
+  - Add visual separation between status events and move execution
+  - Clearly distinguish skipped turns from normal actions
+- [x] Verify status effects work correctly for both player and enemy monsters
+- [x] Prepare hooks/events for future battle animations (Priority 5.7):
+  - StatusApplied
+  - StatusDamage
+  - TurnSkipped
+  - StatusRemoved
+
+
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
 
 ### 6.1 Class diagram updates (address lecturer feedback)

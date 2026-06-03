@@ -16,7 +16,7 @@ namespace MonsterTamer
                 multiplier *= TypeChart.GetMultiplier(MoveType, target.SecondaryType);
             }
 
-            int baseDamage = Power + (caster.Level * 2);
+            int baseDamage  = (int)((Power + (caster.Level * 2)) * caster.AttackMultiplier);
             int finalDamage = (int)(baseDamage * multiplier);
             target.TakeDamage(finalDamage);
 
@@ -69,6 +69,10 @@ namespace MonsterTamer
         {
             if (target.Status != StatusCondition.None)
                 return $"{target.Name} is already affected by a status condition!";
+
+            // Paralysis has a 50% infliction chance; failure means no status is applied
+            if (_inflicts == StatusCondition.Paralysed && new System.Random().NextDouble() >= 0.5)
+                return $"{target.Name} resisted paralysis!";
 
             target.Status = _inflicts;
             return $"{caster.Name} used {Name}! {target.Name} is now {_inflicts}!";

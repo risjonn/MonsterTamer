@@ -1,27 +1,75 @@
 # TODO tasks
 
 
-### 5.7 Move animations
+### 5.7a Battle animation framework & attack animations
 
-- [ ] Implement an animation system — a simple list of active `BattleAnimation` objects updated each frame
-- [ ] **Attack move animation:**
-  - Flash the target monster's position with a brief white/red overlay (3–5 frames)
-  - Show a floating damage number that rises and fades out over ~40 frames
-  - e.g. "-64" in red floating above the enemy sprite
-- [ ] **Heal move animation:**
-  - Flash the caster's position with a green overlay
-  - Show a floating heal number in green e.g. "+30 HP"
-  - Add small rising green particles (3–4 circles moving upward and fading)
-- [ ] **Status move animation:**
-  - Show swirling coloured circles around the target (colour matches status: yellow=paralysed, orange=burned, blue=frozen, purple=poisoned)
-  - Display the status name as a floating text label e.g. "PARALYSED!" in the status colour
-- [ ] **Capture orb animation:**
-  - Draw a circle (orb) that travels from the player side toward the enemy
-  - Orb expands on contact, then shows the result: "Caught!" in gold or "Escaped!" in red
-- [ ] **Potion animation:**
-  - Green glow around the target monster
-  - Floating "+X HP" number in green
-- [ ] All animations must be non-blocking — game loop continues, animations play over a fixed number of frames (use a frame counter, not Thread.Sleep)
+- [ ] Implement a lightweight battle animation system:
+  - Maintain a list of active BattleAnimation objects
+  - Update animations each frame
+  - Draw animations each frame
+  - Automatically remove completed animations
+  - Keep implementation simple and reusable
+  - Avoid introducing unnecessary abstraction
+- [ ] **Attack move animation:**:
+  - Flash target monster with brief white/red overlay (3–5 frames)
+  - Floating damage number rises upward and fades out (~40 frames)
+  - Example: "-64" displayed in red
+  - Works for both player and enemy attacks
+- All animations must:
+  - Be non-blocking
+  - Use frame counters only
+  - Never use Thread.Sleep
+  - Continue updating while the game loop runs normally
+- Prepare reusable hooks for future animation types:
+  - Heal
+  - Status
+  - Capture
+  - Potion
+  - Turn skip
+
+
+### 5.7b Heal, status & turn-skip animations
+
+- [ ] Heal move animation:
+  - Green flash on caster
+  - Floating green heal number
+  - Example: "+30 HP"
+  - 3–4 rising green particles that fade out
+- [ ] Status move animation:
+  - Swirling coloured circles around target
+  - Status colours:
+    - Yellow = Paralysed
+    - Orange = Burned
+    - Blue = Frozen
+    - Purple = Poisoned
+  - Floating status label
+  - Example: "PARALYSED!"
+- [ ]Turn skip animation:
+  - Trigger when Paralysed or Frozen causes a skipped turn
+  - Brief status-coloured flash
+  - Floating "SKIPPED!" text
+- [ ] Reuse animation framework from Priority 5.7a
+- [ ] All animations must:
+  - Be non-blocking
+  - Use frame counters only
+  - Work for both player and enemy monsters
+
+
+### 5.7c Capture & item animations
+- [ ] Capture orb animation:
+  - Orb travels from player side toward enemy
+  - Orb expands on contact
+  - Show result:
+    - "Caught!" in gold
+    - "Escaped!" in red
+- [ ] Potion animation: 
+  - Green glow around target monster
+  - Floating "+X HP" text
+- [ ] Reuse animation framework from Priority 5.7a
+- [ ] All animations must:
+  - Be non-blocking
+  - Use frame counters only
+  - Work correctly with existing battle flow
 
 
 ### 5.8 Battle log improvements

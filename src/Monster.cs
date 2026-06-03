@@ -49,6 +49,7 @@ namespace MonsterTamer
         public bool            HasDualType     => _hasDualType;
         public bool            IsAlive         => _hp > 0;
         public float           HpPercent       => (float)_hp / _maxHp;
+        public float           AttackMultiplier => _statusCondition == StatusCondition.Burned ? 0.75f : 1.0f;
         public StatusCondition Status
         {
             get => _statusCondition;
@@ -76,20 +77,21 @@ namespace MonsterTamer
             _hp    += hpIncrease;
         }
 
-        public void ApplyStatusEffect()
+        // Returns damage dealt (0 for non-damaging statuses)
+        public int ApplyStatusEffect()
         {
             switch (_statusCondition)
             {
                 case StatusCondition.Burned:
-                    TakeDamage((int)(_maxHp * 0.1f));
-                    break;
+                    int burnDmg = (int)(_maxHp * 0.1f);
+                    TakeDamage(burnDmg);
+                    return burnDmg;
                 case StatusCondition.Poisoned:
-                    TakeDamage((int)(_maxHp * 0.08f));
-                    break;
-                case StatusCondition.Frozen:
-                case StatusCondition.Paralysed:
-                case StatusCondition.None:
-                    break;
+                    int poisonDmg = (int)(_maxHp * 0.08f);
+                    TakeDamage(poisonDmg);
+                    return poisonDmg;
+                default:
+                    return 0;
             }
         }
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace MonsterTamer
@@ -12,6 +13,12 @@ namespace MonsterTamer
         private WildMonster?   _wildTarget;  // set if battling a wild monster
         private BossMonster?   _bossTarget;  // set if battling the final boss
         private string         _lastPlayerMonsterName = "";
+
+        // Hooks for future animation system (Priority 5.7)
+        public event Action<Monster, StatusCondition>?      StatusApplied;
+        public event Action<Monster, StatusCondition, int>? StatusDamage;
+        public event Action<Monster>?                       TurnSkipped;
+        public event Action<Monster, StatusCondition>?      StatusRemoved;
 
         public BattleManager(PlayerTrainer player, Trainer opponent)
         {
@@ -56,22 +63,44 @@ namespace MonsterTamer
             if (moveIndex < 0 || moveIndex >= attacker.MoveSet.Length)
                 return "Invalid move!";
 
-            // Apply status before moving
+            // Apply burn/poison damage before acting; track whether damage was logged
+            bool hadStatusDamage = attacker.Status == StatusCondition.Burned
+                                || attacker.Status == StatusCondition.Poisoned;
             ApplyStatusEffect(attacker);
 
-            // Status conditions may skip turn
+            // Frozen: always skips exactly one turn, then clears
             if (attacker.Status == StatusCondition.Frozen)
             {
+                string msg = $"{attacker.Name} is frozen solid!";
+                StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
-                return $"{attacker.Name} thawed out and cannot move this turn!";
+                _battleLog.Add(msg);
+                TurnSkipped?.Invoke(attacker);
+                StatusRemoved?.Invoke(attacker, prev);
+                return msg;
             }
-            if (attacker.Status == StatusCondition.Paralysed &&
-                new System.Random().NextDouble() < 0.5)
-                return $"{attacker.Name} is paralysed and couldn't move!";
 
+            // Paralysed: guaranteed skip for one turn, then clears
+            if (attacker.Status == StatusCondition.Paralysed)
+            {
+                string msg = $"{attacker.Name} is paralysed and cannot move!";
+                StatusCondition prev = attacker.Status;
+                attacker.Status = StatusCondition.None;
+                _battleLog.Add(msg);
+                TurnSkipped?.Invoke(attacker);
+                StatusRemoved?.Invoke(attacker, prev);
+                return msg;
+            }
+
+            // Visual separator between status events and move execution
+            if (hadStatusDamage) _battleLog.Add("──");
+
+            StatusCondition defenderStatusBefore = defender.Status;
             Move   selectedMove = attacker.MoveSet[moveIndex];
             string result       = selectedMove.Execute(attacker, defender);
             _battleLog.Add(result);
+            if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
+                StatusApplied?.Invoke(defender, defender.Status);
             return result;
         }
 
@@ -120,25 +149,43 @@ namespace MonsterTamer
                 moveIndex = (_opponent is AITrainer ai) ? ai.SelectedMoveIndex : 0;
             }
 
-            // Apply burn/poison damage and check for skip conditions
+            // Apply burn/poison damage before acting
+            bool hadStatusDamage = attacker.Status == StatusCondition.Burned
+                                || attacker.Status == StatusCondition.Poisoned;
             ApplyStatusEffect(attacker);
+
+            // Frozen: always skips exactly one turn, then clears
             if (attacker.Status == StatusCondition.Frozen)
             {
+                string msg = $"{attacker.Name} is frozen solid!";
+                StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
-                string thaw = $"{attacker.Name} thawed out and lost its turn!";
-                _battleLog.Add(thaw);
-                return thaw;
-            }
-            if (attacker.Status == StatusCondition.Paralysed &&
-                new System.Random().NextDouble() < 0.5)
-            {
-                string para = $"{attacker.Name} is paralysed and couldn't move!";
-                _battleLog.Add(para);
-                return para;
+                _battleLog.Add(msg);
+                TurnSkipped?.Invoke(attacker);
+                StatusRemoved?.Invoke(attacker, prev);
+                return msg;
             }
 
+            // Paralysed: guaranteed skip for one turn, then clears
+            if (attacker.Status == StatusCondition.Paralysed)
+            {
+                string msg = $"{attacker.Name} is paralysed and cannot move!";
+                StatusCondition prev = attacker.Status;
+                attacker.Status = StatusCondition.None;
+                _battleLog.Add(msg);
+                TurnSkipped?.Invoke(attacker);
+                StatusRemoved?.Invoke(attacker, prev);
+                return msg;
+            }
+
+            // Visual separator between status events and move execution
+            if (hadStatusDamage) _battleLog.Add("──");
+
+            StatusCondition defenderStatusBefore = defender.Status;
             string result = moveset[moveIndex].Execute(attacker, defender);
             _battleLog.Add(result);
+            if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
+                StatusApplied?.Invoke(defender, defender.Status);
             return result;
         }
 
@@ -184,10 +231,19 @@ namespace MonsterTamer
 
         private void ApplyStatusEffect(Monster m)
         {
-            if (m.Status != StatusCondition.None)
+            StatusCondition status = m.Status;
+            int dmg = m.ApplyStatusEffect();
+
+            switch (status)
             {
-                m.ApplyStatusEffect();
-                _battleLog.Add($"{m.Name} is affected by {m.Status}!");
+                case StatusCondition.Burned:
+                    _battleLog.Add($"{m.Name} is hurt by its burn! (-{dmg} HP)");
+                    StatusDamage?.Invoke(m, status, dmg);
+                    break;
+                case StatusCondition.Poisoned:
+                    _battleLog.Add($"{m.Name} is hurt by poison! (-{dmg} HP)");
+                    StatusDamage?.Invoke(m, status, dmg);
+                    break;
             }
         }
 

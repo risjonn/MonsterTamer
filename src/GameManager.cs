@@ -1406,7 +1406,7 @@ namespace MonsterTamer
                 {
                     int mx = barX + (mi % 4) * 136;
                     int my = py + 64;
-                    SplashKit.DrawText($"· {m.MoveSet[mi].Name}",
+                    SplashKit.DrawText($"- {m.MoveSet[mi].Name}",
                         SplashKit.RGBColor(140, 180, 140), "Arial", 10, mx, my);
                 }
             }
