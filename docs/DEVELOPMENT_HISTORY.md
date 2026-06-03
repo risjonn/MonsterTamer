@@ -281,6 +281,34 @@ Goal:
 - [x] All animations are non-blocking — no `Thread.Sleep`, only frame counters
 - [x] Reuse hooks ready for 5.7b: `StatusApplied`, `StatusDamage`, `TurnSkipped`, `StatusRemoved` events already wired in `BattleManager`
 
+
+### 5.7b Heal, status & turn-skip animations
+
+- [x] Heal move animation:
+  - Green flash on caster
+  - Floating green heal number
+  - Example: "+30 HP"
+  - 3–4 rising green particles that fade out
+- [x] Status move animation:
+  - Swirling coloured circles around target
+  - Status colours:
+    - Yellow = Paralysed
+    - Orange = Burned
+    - Blue = Frozen
+    - Purple = Poisoned
+  - Floating status label
+  - Example: "PARALYSED!"
+- [x]Turn skip animation:
+  - Trigger when Paralysed or Frozen causes a skipped turn
+  - Brief status-coloured flash
+  - Floating "SKIPPED!" text
+- [x] Reuse animation framework from Priority 5.7a
+- [x] All animations must:
+  - Be non-blocking
+  - Use frame counters only
+  - Work for both player and enemy monsters
+
+
 ### 5.6 Status condition logic fix
 
 - [x] **Paralysed**:

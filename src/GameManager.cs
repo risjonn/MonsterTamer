@@ -515,8 +515,11 @@ namespace MonsterTamer
         {
             AITrainer dummy     = new AITrainer("Wild");
             _battleManager      = new BattleManager(_player, dummy);
-            _battleManager.WildTarget = wild;
-            _battleManager.AttackHit += OnAttackHit;
+            _battleManager.WildTarget      = wild;
+            _battleManager.AttackHit      += OnAttackHit;
+            _battleManager.HealUsed       += OnHealUsed;
+            _battleManager.StatusApplied  += OnStatusApplied;
+            _battleManager.TurnSkipped    += OnTurnSkipped;
             _battleManager.AddLog($"A wild {wild.Name} appeared!");
             _battleManager.AddLog($"{wild.GetBattleCry()}");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
@@ -527,7 +530,10 @@ namespace MonsterTamer
         private void StartTrainerBattle(AITrainer trainer)
         {
             _battleManager = new BattleManager(_player, trainer);
-            _battleManager.AttackHit += OnAttackHit;
+            _battleManager.AttackHit     += OnAttackHit;
+            _battleManager.HealUsed      += OnHealUsed;
+            _battleManager.StatusApplied += OnStatusApplied;
+            _battleManager.TurnSkipped   += OnTurnSkipped;
             _battleManager.AddLog($"Trainer {trainer.Name} wants to battle!");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
             ResetBattleAnimState();
@@ -551,11 +557,14 @@ namespace MonsterTamer
 
         private void StartBossBattle()
         {
-            BossMonster nagaBelian = MonsterFactory.CreateNagaBelian();
+            BossMonster nagaBelian  = MonsterFactory.CreateNagaBelian();
             AITrainer   bossTrainer = new AITrainer("Naga Belian", 3);
             _battleManager = new BattleManager(_player, bossTrainer);
-            _battleManager.BossTarget = nagaBelian;
-            _battleManager.AttackHit += OnAttackHit;
+            _battleManager.BossTarget    = nagaBelian;
+            _battleManager.AttackHit    += OnAttackHit;
+            _battleManager.HealUsed     += OnHealUsed;
+            _battleManager.StatusApplied+= OnStatusApplied;
+            _battleManager.TurnSkipped  += OnTurnSkipped;
             _battleManager.AddLog("NAGA BELIAN EMERGES FROM THE DEPTHS!");
             _battleManager.AddLog(nagaBelian.GetBattleCry());
             ResetBattleAnimState();
@@ -618,6 +627,32 @@ namespace MonsterTamer
             float cy      = isEnemy ? 168f : 312f;
             _battleAnimations.Add(new HitFlashAnimation(cx, cy));
             _battleAnimations.Add(new DamageNumberAnimation(cx, cy - 30f, damage));
+        }
+
+        private void OnHealUsed(Monster caster, int healAmount)
+        {
+            bool  isEnemy = (caster == _battleManager?.EnemyMonster);
+            float cx      = isEnemy ? 845f : 272f;
+            float cy      = isEnemy ? 168f : 312f;
+            _battleAnimations.Add(new HealFlashAnimation(cx, cy));
+            _battleAnimations.Add(new HealNumberAnimation(cx, cy - 30f, healAmount));
+            _battleAnimations.Add(new HealParticleAnimation(cx, cy));
+        }
+
+        private void OnStatusApplied(Monster target, StatusCondition status)
+        {
+            bool  isEnemy = (target == _battleManager?.EnemyMonster);
+            float cx      = isEnemy ? 845f : 272f;
+            float cy      = isEnemy ? 168f : 312f;
+            _battleAnimations.Add(new StatusSwirlAnimation(cx, cy, status));
+        }
+
+        private void OnTurnSkipped(Monster monster, StatusCondition status)
+        {
+            bool  isEnemy = monster == _battleManager?.EnemyMonster;
+            float cx      = isEnemy ? 845f : 272f;
+            float cy      = isEnemy ? 168f : 312f;
+            _battleAnimations.Add(new TurnSkipAnimation(cx, cy, status));
         }
 
         private void ShowBattleResult()

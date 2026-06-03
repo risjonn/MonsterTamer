@@ -16,9 +16,10 @@ namespace MonsterTamer
 
         // Animation hooks — subscribe in GameManager to create BattleAnimation instances
         public event Action<Monster, int>?                  AttackHit;      // target, damage dealt
+        public event Action<Monster, int>?                  HealUsed;       // caster, amount healed
         public event Action<Monster, StatusCondition>?      StatusApplied;
         public event Action<Monster, StatusCondition, int>? StatusDamage;
-        public event Action<Monster>?                       TurnSkipped;
+        public event Action<Monster, StatusCondition>?      TurnSkipped;    // monster, status that caused skip
         public event Action<Monster, StatusCondition>?      StatusRemoved;
 
         public BattleManager(PlayerTrainer player, Trainer opponent)
@@ -76,7 +77,7 @@ namespace MonsterTamer
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
                 _battleLog.Add(msg);
-                TurnSkipped?.Invoke(attacker);
+                TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
             }
@@ -88,7 +89,7 @@ namespace MonsterTamer
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
                 _battleLog.Add(msg);
-                TurnSkipped?.Invoke(attacker);
+                TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
             }
@@ -97,11 +98,14 @@ namespace MonsterTamer
             if (hadStatusDamage) _battleLog.Add("──");
 
             StatusCondition defenderStatusBefore = defender.Status;
-            Move   selectedMove = attacker.MoveSet[moveIndex];
-            int    hpBefore     = defender.Hp;
-            string result       = selectedMove.Execute(attacker, defender);
-            int    damageDealt  = Math.Max(0, hpBefore - defender.Hp);
+            Move   selectedMove    = attacker.MoveSet[moveIndex];
+            int    hpBefore        = defender.Hp;
+            int    attackerHpBefore = attacker.Hp;
+            string result          = selectedMove.Execute(attacker, defender);
+            int    damageDealt     = Math.Max(0, hpBefore - defender.Hp);
+            int    healAmount      = Math.Max(0, attacker.Hp - attackerHpBefore);
             if (damageDealt > 0) AttackHit?.Invoke(defender, damageDealt);
+            if (healAmount  > 0) HealUsed?.Invoke(attacker, healAmount);
             _battleLog.Add(result);
             if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
                 StatusApplied?.Invoke(defender, defender.Status);
@@ -165,7 +169,7 @@ namespace MonsterTamer
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
                 _battleLog.Add(msg);
-                TurnSkipped?.Invoke(attacker);
+                TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
             }
@@ -177,7 +181,7 @@ namespace MonsterTamer
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
                 _battleLog.Add(msg);
-                TurnSkipped?.Invoke(attacker);
+                TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
             }
@@ -186,10 +190,13 @@ namespace MonsterTamer
             if (hadStatusDamage) _battleLog.Add("──");
 
             StatusCondition defenderStatusBefore = defender.Status;
-            int    hpBefore    = defender.Hp;
-            string result      = moveset[moveIndex].Execute(attacker, defender);
-            int    damageDealt = Math.Max(0, hpBefore - defender.Hp);
+            int    hpBefore        = defender.Hp;
+            int    attackerHpBefore = attacker.Hp;
+            string result          = moveset[moveIndex].Execute(attacker, defender);
+            int    damageDealt     = Math.Max(0, hpBefore - defender.Hp);
+            int    healAmount      = Math.Max(0, attacker.Hp - attackerHpBefore);
             if (damageDealt > 0) AttackHit?.Invoke(defender, damageDealt);
+            if (healAmount  > 0) HealUsed?.Invoke(attacker, healAmount);
             _battleLog.Add(result);
             if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
                 StatusApplied?.Invoke(defender, defender.Status);

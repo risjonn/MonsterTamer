@@ -1,33 +1,6 @@
 # TODO tasks
 
 
-### 5.7b Heal, status & turn-skip animations
-
-- [ ] Heal move animation:
-  - Green flash on caster
-  - Floating green heal number
-  - Example: "+30 HP"
-  - 3–4 rising green particles that fade out
-- [ ] Status move animation:
-  - Swirling coloured circles around target
-  - Status colours:
-    - Yellow = Paralysed
-    - Orange = Burned
-    - Blue = Frozen
-    - Purple = Poisoned
-  - Floating status label
-  - Example: "PARALYSED!"
-- [ ]Turn skip animation:
-  - Trigger when Paralysed or Frozen causes a skipped turn
-  - Brief status-coloured flash
-  - Floating "SKIPPED!" text
-- [ ] Reuse animation framework from Priority 5.7a
-- [ ] All animations must:
-  - Be non-blocking
-  - Use frame counters only
-  - Work for both player and enemy monsters
-
-
 ### 5.7c Capture & item animations
 - [ ] Capture orb animation:
   - Orb travels from player side toward enemy
