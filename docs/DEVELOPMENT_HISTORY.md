@@ -212,6 +212,62 @@ Goal:
 - [x] Preserve all existing gameplay behaviour and UI layouts
 
 
+### 5.5 UI Layout & Readability Pass
+
+- [x] Fix move box layout — all text must be clipped or wrapped inside the move box bounds:
+  - Move name: truncate with "..." if too long for box width
+  - PWR value: right-align inside the box, not outside
+  - Type badge: must sit inside the bottom of the move box
+  - Category label: sits below move name, inside box
+
+- [x] Fix battle log text overflow — wrap long sentences across multiple lines inside the log box:
+  - Implement a simple word-wrap function
+  - Split strings by spaces and build lines that fit within log box width
+  - Show the most recent 4–5 wrapped lines
+  - Oldest wrapped lines scroll off the top
+
+- [x] Fix info panel layout — ensure HP bar, type badges, name, and level label remain within panel bounds:
+  - Must work correctly for all monster name lengths
+  - Must work correctly for all type badge combinations
+
+- [x] Add a thin separator line between each move box
+
+- [x] Ensure all battle UI panels use consistent padding:
+  - 10px inner margin minimum
+  - Consistent spacing between UI elements
+
+- [x] Fix battle command hint layout:
+  - "Arrows/Enter: Use Move"
+  - "C: Bag"
+  - "X: Swap"
+  - "Esc: Flee"
+  - All command hints must remain fully visible inside their panel
+  - No text overflow outside the move selection box
+  - Maintain readable spacing between hints
+
+- [x] Fix type badge sizing throughout battle-related UI:
+  - Type names must always fit inside their coloured badge
+  - Long type names (e.g. "Electric") must not overflow badge boundaries
+  - Dynamically size badge width based on text width and padding
+
+- [x] Fix Wild EncounterPrompt layout:
+  - Monster sprite must not overlap monster information
+  - Monster name, level, and type badges must remain fully readable
+  - Reposition layout elements to accommodate PNG sprite artwork
+  - Maintain visual balance within the encounter overlay
+
+- [x] Fix Boss EncounterPrompt layout:
+  - Party monster sprites must not overlap monster information
+  - Monster name, level, and type badges must remain fully readable
+  - Support trainers with multiple monsters
+  - Maintain consistent spacing between party entries
+
+- [x] Review all battle and encounter overlays after PNG sprite migration:
+  - Ensure text, badges, sprites, and panels do not overlap
+  - Ensure all UI remains readable at 1280×720
+  - Preserve existing functionality and animations
+
+
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
 
 ### 6.1 Class diagram updates (address lecturer feedback)

@@ -544,10 +544,10 @@ namespace MonsterTamer
         {
             // Top-left HUD — expand slightly when cleared to fit badge
             int hudH = _isCleared ? 82 : 64;
-            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200), 8, 8, 220, hudH);
+            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200), 8, 8, 280, hudH);
             SplashKit.DrawRectangle(
                 _isCleared ? SplashKit.RGBColor(0, 255, 100) : SplashKit.RGBColor(74, 198, 100),
-                8, 8, 220, hudH);
+                8, 8, 280, hudH);
             SplashKit.DrawText(_regionName,
                 SplashKit.RGBColor(255, 215, 0), "Arial", 14, 18, 18);
 
@@ -563,7 +563,7 @@ namespace MonsterTamer
             }
             else
             {
-                SplashKit.DrawText("Tall grass — wild encounters",
+                SplashKit.DrawText("Tall grass - wild encounters",
                     SplashKit.RGBColor(160, 220, 160), "Arial", 9, 18, 38);
                 SplashKit.DrawText("Walk into a trainer (!) to battle",
                     SplashKit.RGBColor(160, 220, 160), "Arial", 9, 18, 52);

@@ -67,60 +67,27 @@ Constants:          PascalCase      e.g. const int MaxSlots = 6
 
 # CURRENT TASK
 
-### 5.5 UI Layout & Readability Pass
+### 5.6 Move animations
 
-- [ ] Fix move box layout — all text must be clipped or wrapped inside the move box bounds:
-  - Move name: truncate with "..." if too long for box width
-  - PWR value: right-align inside the box, not outside
-  - Type badge: must sit inside the bottom of the move box
-  - Category label: sits below move name, inside box
-
-- [ ] Fix battle log text overflow — wrap long sentences across multiple lines inside the log box:
-  - Implement a simple word-wrap function
-  - Split strings by spaces and build lines that fit within log box width
-  - Show the most recent 4–5 wrapped lines
-  - Oldest wrapped lines scroll off the top
-
-- [ ] Fix info panel layout — ensure HP bar, type badges, name, and level label remain within panel bounds:
-  - Must work correctly for all monster name lengths
-  - Must work correctly for all type badge combinations
-
-- [ ] Add a thin separator line between each move box
-
-- [ ] Ensure all battle UI panels use consistent padding:
-  - 10px inner margin minimum
-  - Consistent spacing between UI elements
-
-- [ ] Fix battle command hint layout:
-  - "Arrows/Enter: Use Move"
-  - "C: Bag"
-  - "X: Swap"
-  - "Esc: Flee"
-  - All command hints must remain fully visible inside their panel
-  - No text overflow outside the move selection box
-  - Maintain readable spacing between hints
-
-- [ ] Fix type badge sizing throughout battle-related UI:
-  - Type names must always fit inside their coloured badge
-  - Long type names (e.g. "Electric") must not overflow badge boundaries
-  - Dynamically size badge width based on text width and padding
-
-- [ ] Fix Wild EncounterPrompt layout:
-  - Monster sprite must not overlap monster information
-  - Monster name, level, and type badges must remain fully readable
-  - Reposition layout elements to accommodate PNG sprite artwork
-  - Maintain visual balance within the encounter overlay
-
-- [ ] Fix Boss EncounterPrompt layout:
-  - Party monster sprites must not overlap monster information
-  - Monster name, level, and type badges must remain fully readable
-  - Support trainers with multiple monsters
-  - Maintain consistent spacing between party entries
-
-- [ ] Review all battle and encounter overlays after PNG sprite migration:
-  - Ensure text, badges, sprites, and panels do not overlap
-  - Ensure all UI remains readable at 1280×720
-  - Preserve existing functionality and animations
+- [ ] Implement an animation system — a simple list of active `BattleAnimation` objects updated each frame
+- [ ] **Attack move animation:**
+  - Flash the target monster's position with a brief white/red overlay (3–5 frames)
+  - Show a floating damage number that rises and fades out over ~40 frames
+  - e.g. "-64" in red floating above the enemy sprite
+- [ ] **Heal move animation:**
+  - Flash the caster's position with a green overlay
+  - Show a floating heal number in green e.g. "+30 HP"
+  - Add small rising green particles (3–4 circles moving upward and fading)
+- [ ] **Status move animation:**
+  - Show swirling coloured circles around the target (colour matches status: yellow=paralysed, orange=burned, blue=frozen, purple=poisoned)
+  - Display the status name as a floating text label e.g. "PARALYSED!" in the status colour
+- [ ] **Capture orb animation:**
+  - Draw a circle (orb) that travels from the player side toward the enemy
+  - Orb expands on contact, then shows the result: "Caught!" in gold or "Escaped!" in red
+- [ ] **Potion animation:**
+  - Green glow around the target monster
+  - Floating "+X HP" number in green
+- [ ] All animations must be non-blocking — game loop continues, animations play over a fixed number of frames (use a frame counter, not Thread.Sleep)
 
 # Architecture References
 

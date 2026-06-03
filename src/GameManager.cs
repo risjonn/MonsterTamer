@@ -689,7 +689,7 @@ namespace MonsterTamer
             }
 
             // ── Flavour info line ────────────────────────────────────────────────
-            SplashKit.DrawText("3 Regions  ·  8 Tameables  ·  1 Legendary Boss",
+            SplashKit.DrawText("3 Regions  -  8 Tameables  -  1 Legendary Boss",
                 SplashKit.RGBColor(70, 150, 90), "Arial", 11, cx - 192, 516);
 
             // ── Bottom hints bar ─────────────────────────────────────────────────
@@ -986,7 +986,7 @@ namespace MonsterTamer
                 : _showingItemMenu
                     ? "Up/Down: Select Item     Enter: Use     C: Back"
                     : "Arrows/Enter: Use Move     C: Bag     X: Swap     Esc: Flee";
-            SplashKit.DrawText(hint, SplashKit.RGBColor(90, 110, 90), "Arial", 10, 22, ScreenH - 18);
+            SplashKit.DrawText(hint, SplashKit.RGBColor(90, 110, 90), "Arial", 10, 22, 694);
 
             // Battle result overlay — fades in over 25 frames, then holds
             if (_pendingBattleEnd && _battleManager != null)
