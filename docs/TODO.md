@@ -1,7 +1,7 @@
 # TODO tasks
 
 
-### 5.8 Battle log improvements
+### 5.9 Battle log improvements
 
 - [ ] Colour-code battle log entries:
   - Player's move results: bright white or light blue
@@ -9,29 +9,28 @@
   - Status condition messages: colour matching the status (yellow, orange, blue, purple)
   - System messages (battle start, capture result, turn skips): grey or italic style
   - Damage numbers in log: red for damage taken, green for healing
-- [ ] Add a small icon prefix per log entry type (e.g. "▶" for player, "◀" for enemy, "★" for status, "♥" for heal)
+- [ ] Add a small icon prefix per log entry type (e.g. ">")
 - [ ] Show turn number at the start of each new turn as a separator in the log e.g. "── Turn 3 ──"
 - [ ] Most recent entry should be at the bottom and most visually prominent (full opacity), older entries fade
 
-### 5.9 Battle screen tips and info
+### 5.10 Battle screen tips and info
 
 - [ ] Add a small "Tips" panel or info line below the move panel showing:
-  - Type effectiveness hint: e.g. "Flying is super effective against Grass!" based on current enemy type vs selected move type
-  - Capture hint: show current estimated capture % based on enemy HP (e.g. "Catch chance: ~34%") — only show this if player has a Capture Orb in bag
-  - Status reminder: if enemy has a status, show "Enemy: Paralysed — 50% chance to skip"
+  - Type effectiveness hint:
+    - Example: "Flying is super effective against Grass!" based on current enemy type vs selected move type
+  - Capture hint (only if player has a Capture Orb):
+    - Show estimated capture chance based on current battle state
+    - Example:
+      - "Capture Chance: Very Low"
+      - "Capture Chance: Low"
+      - "Capture Chance: Moderate"
+      - "Capture Chance: High"
+      - "Capture Chance: Very High"
+  - Capture chance should update dynamically as enemy HP changes
 - [ ] Highlight the currently selected move's type badge more prominently when it would be super effective against the enemy
 
-### 5.10 Capture result screen
 
-- [ ] When a monster is successfully caught (`CaptureResult.Caught`), show a dedicated result screen (similar to victory/defeat) before returning to overworld:
-  - Display the caught monster's name, level, and type badges
-  - Show the monster's geometric sprite
-  - Show its catch stats: HP remaining, catch rate, result
-  - Message: "X was added to your party!" or "X was released — party full!" if party is at 6
-  - Press Enter to continue
-- [ ] If the monster escaped or the orb failed, show a brief message overlay (not a full screen) and return to battle
-
-### 5.11 Item replenishment / shop system
+### 5.11 Item replenishment / shop system (Optional enhancement)
 
 - [ ] Add a `ShopState` (`GameState.Shop`) accessible from the overworld (e.g. press B for bag/shop, or place a shop tile on the map near the region start)
 - [ ] Shop inventory (fixed, always available):

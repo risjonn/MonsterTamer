@@ -19,6 +19,7 @@ namespace MonsterTamer
         EncounterPrompt,
         Battle,
         PartyScreen,
+        CaptureScreen,
         Victory,
         GameOver
     }

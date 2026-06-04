@@ -22,14 +22,16 @@ namespace MonsterTamer
             // Actual catch logic is handled by BattleManager using AttemptCapture()
         }
 
+        public float ComputeCatchChance(WildMonster target)
+            => (1.0f - target.HpPercent) * target.CatchRate * _captureModifier;
+
         public CaptureResult AttemptCapture(WildMonster target)
         {
             // Probability increases as target HP decreases
-            float hpFactor    = 1.0f - target.HpPercent;
-            float catchChance = hpFactor * target.CatchRate * _captureModifier;
+            float catchChance = ComputeCatchChance(target);
             float roll        = (float)_rng.NextDouble();
 
-            if (roll <= catchChance)   return CaptureResult.Caught;
+            if (roll <= catchChance)        return CaptureResult.Caught;
             if (roll <= catchChance * 1.5f) return CaptureResult.Escaped;
             return CaptureResult.Failed;
         }

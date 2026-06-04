@@ -46,6 +46,17 @@ namespace MonsterTamer
         private bool _pendingCaptureEnd = false;
         private int  _captureEndTimer   = 0;
 
+        // Capture result screen data — populated when capture succeeds
+        private string      _capturedMonsterName      = "";
+        private int         _capturedMonsterLevel     = 1;
+        private MonsterType _capturedMonsterPrimary   = MonsterType.Normal;
+        private MonsterType _capturedMonsterSecondary = MonsterType.Normal;
+        private bool        _capturedHasDual          = false;
+        private int         _capturedHpAtCapture      = 0;
+        private int         _capturedMaxHp            = 1;
+        private string      _captureChanceLabel       = "";
+        private string      _capturePartyMessage      = "";
+
         // Screen resolution constants — reference everywhere instead of hardcoded 800/600
         private const int ScreenW = 1280;
         private const int ScreenH = 720;
@@ -187,6 +198,8 @@ namespace MonsterTamer
                 }
                 else if (_state == GameState.PartyScreen)
                     _state = GameState.Overworld;
+                else if (_state == GameState.CaptureScreen)
+                    EndBattle();
                 else if (_state == GameState.Overworld)
                     _state = GameState.MainMenu;
                 else
@@ -234,6 +247,11 @@ namespace MonsterTamer
                     if (SplashKit.KeyTyped(KeyCode.PKey) ||
                         SplashKit.KeyTyped(KeyCode.ReturnKey))
                         _state = GameState.Overworld;
+                    break;
+
+                case GameState.CaptureScreen:
+                    if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+                        EndBattle();
                     break;
 
                 case GameState.Victory:
@@ -342,11 +360,28 @@ namespace MonsterTamer
 
                     if (result == CaptureResult.Caught)
                     {
-                        TamedMonster tamed = MonsterFactory.Tame(_battleManager.WildTarget!);
-                        if (_player.Party.AddMonster(tamed))
-                            _battleManager.AddLog($"{tamed.Name} joined your party!");
-                        else
-                            _battleManager.AddLog($"{tamed.Name} was released — party is full!");
+                        WildMonster wild = _battleManager.WildTarget!;
+                        // Snapshot data for the capture result screen before taming
+                        _capturedMonsterName      = wild.Name;
+                        _capturedMonsterLevel     = wild.Level;
+                        _capturedMonsterPrimary   = wild.PrimaryType;
+                        _capturedMonsterSecondary = wild.SecondaryType;
+                        _capturedHasDual          = wild.HasDualType;
+                        _capturedHpAtCapture      = wild.Hp;
+                        _capturedMaxHp            = wild.MaxHp;
+                        float chance = orb.ComputeCatchChance(wild);
+                        _captureChanceLabel = chance < 0.10f ? "Very Low"
+                                            : chance < 0.20f ? "Low"
+                                            : chance < 0.35f ? "Moderate"
+                                            : chance < 0.50f ? "High"
+                                            : "Very High";
+
+                        TamedMonster tamed = MonsterFactory.Tame(wild);
+                        bool added = _player.Party.AddMonster(tamed);
+                        _capturePartyMessage = added
+                            ? $"{tamed.Name} was added to your party!"
+                            : $"{tamed.Name} was released - Party full";
+                        _battleManager.AddLog(_capturePartyMessage);
                         _pendingCaptureEnd = true;
                         _captureEndTimer   = 140;
                         return;
@@ -482,7 +517,7 @@ namespace MonsterTamer
                     if (_captureEndTimer <= 0)
                     {
                         _pendingCaptureEnd = false;
-                        EndBattle();
+                        _state = GameState.CaptureScreen;
                     }
                 }
             }
@@ -530,6 +565,7 @@ namespace MonsterTamer
                 case GameState.EncounterPrompt: DrawOverworld(); DrawEncounterPrompt(); break;
                 case GameState.Battle:          DrawBattle();                          break;
                 case GameState.PartyScreen:     DrawPartyScreen();                     break;
+                case GameState.CaptureScreen:   DrawCaptureScreen();                   break;
                 case GameState.Victory:         DrawVictory();                         break;
                 case GameState.GameOver:        DrawGameOver();                        break;
             }
@@ -1539,6 +1575,79 @@ namespace MonsterTamer
 
             SplashKit.DrawText("P or Enter to return",
                 SplashKit.RGBColor(100, 150, 100), "Arial", 12, ScreenW / 2 - 80, ScreenH - 40);
+        }
+
+        private void DrawCaptureScreen()
+        {
+            SplashKit.FillRectangle(SplashKit.RGBColor(5, 15, 40), 0, 0, ScreenW, ScreenH);
+
+            // Soft aura behind the sprite
+            SplashKit.FillEllipse(SplashKit.RGBAColor(255, 215, 0, 18),
+                ScreenW / 2 - 180, 40, 360, 360);
+            SplashKit.FillEllipse(SplashKit.RGBAColor(80, 200, 255, 12),
+                ScreenW / 2 - 130, 80, 260, 260);
+
+            int cx = ScreenW / 2;
+
+            // Title
+            string title = "CAPTURED!";
+            int tw = SplashKit.TextWidth(title, "Arial", 48);
+            SplashKit.DrawText(title, SplashKit.RGBColor(255, 215, 0), "Arial", 48, cx - tw / 2, 60);
+
+            // Monster sprite — non-player scale (larger) centred at top half of screen
+            DrawMonsterSprite(_capturedMonsterName, cx, 225, false, 120f);
+
+            // Info card
+            int cardX = cx - 280, cardY = 320, cardW = 560, cardH = 250;
+            SplashKit.FillRectangle(SplashKit.RGBAColor(5, 18, 50, 230), cardX, cardY, cardW, cardH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(255, 215, 0),     cardX,     cardY,     cardW,     cardH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(160, 130, 30),    cardX + 3, cardY + 3, cardW - 6, cardH - 6);
+
+            // Name
+            string nameText = _capturedMonsterName;
+            int nw = SplashKit.TextWidth(nameText, "Arial", 22);
+            SplashKit.DrawText(nameText, SplashKit.ColorWhite(), "Arial", 22, cx - nw / 2, cardY + 16);
+
+            // Level
+            string lvText = $"Lv. {_capturedMonsterLevel}";
+            int lw = SplashKit.TextWidth(lvText, "Arial", 13);
+            SplashKit.DrawText(lvText, SplashKit.RGBColor(170, 220, 170), "Arial", 13, cx - lw / 2, cardY + 46);
+
+            // Type badges centred
+            int primaryW   = TypeBadgeWidth(_capturedMonsterPrimary);
+            int secondaryW = _capturedHasDual ? TypeBadgeWidth(_capturedMonsterSecondary) : 0;
+            int totalBW    = primaryW + (_capturedHasDual ? secondaryW + 6 : 0);
+            int bStartX    = cx - totalBW / 2;
+            DrawTypeBadge(_capturedMonsterPrimary, bStartX, cardY + 68);
+            if (_capturedHasDual)
+                DrawTypeBadge(_capturedMonsterSecondary, bStartX + primaryW + 6, cardY + 68);
+
+            // Divider
+            SplashKit.DrawLine(SplashKit.RGBColor(60, 100, 160),
+                cardX + 20, cardY + 92, cardX + cardW - 20, cardY + 92);
+
+            // Capture stats
+            string hpText = $"HP at capture:  {_capturedHpAtCapture} / {_capturedMaxHp}";
+            int hw = SplashKit.TextWidth(hpText, "Arial", 12);
+            SplashKit.DrawText(hpText, SplashKit.RGBColor(160, 200, 220), "Arial", 12, cx - hw / 2, cardY + 106);
+
+            string chanceText = $"Capture Chance:  {_captureChanceLabel}";
+            int chw = SplashKit.TextWidth(chanceText, "Arial", 12);
+            SplashKit.DrawText(chanceText, SplashKit.RGBColor(160, 200, 220), "Arial", 12, cx - chw / 2, cardY + 126);
+
+            // Party result message — colour shifts for "released" case
+            string msg   = _capturePartyMessage;
+            int    msgW  = SplashKit.TextWidth(msg, "Arial", 16);
+            Color  msgC  = msg.Contains("released")
+                ? SplashKit.RGBColor(240, 180, 80)
+                : SplashKit.RGBColor(100, 230, 255);
+            SplashKit.DrawText(msg, msgC, "Arial", 16, cx - msgW / 2, cardY + 162);
+
+            // Prompt
+            string prompt = "Press Enter to continue";
+            int    pw2    = SplashKit.TextWidth(prompt, "Arial", 12);
+            SplashKit.DrawText(prompt, SplashKit.RGBColor(100, 150, 100), "Arial", 12,
+                cx - pw2 / 2, ScreenH - 44);
         }
 
         private void DrawVictory()

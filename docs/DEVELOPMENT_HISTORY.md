@@ -356,6 +356,18 @@ Goal:
   - Work correctly with existing battle flow
 
 
+### 5.8 Capture result screen
+
+- [x] New `GameState.CaptureScreen` added to `Enumerations.cs`
+- [x] `CaptureOrb.ComputeCatchChance(WildMonster)` added to `ConcreteItems.cs` — DRY refactor of internal formula; reused by `AttemptCapture()`
+- [x] On successful capture: WildMonster snapshot (name, level, types, HP, MaxHP) stored before taming; catch-chance label computed (Very Low / Low / Moderate / High / Very High at <0.10 / <0.20 / <0.35 / <0.50 / >=0.50)
+- [x] `_pendingCaptureEnd` timer now transitions to `GameState.CaptureScreen` instead of calling `EndBattle()` directly
+- [x] `DrawCaptureScreen()` — dark-blue full-screen; gold "CAPTURED!" title; monster sprite (non-player scale, with idle bob); gold-bordered info card showing name, level, type badges, HP at capture, catch-chance label, and party message; "Press Enter to continue" at bottom
+- [x] Party message colour: cyan when added, amber when released (party full)
+- [x] Enter and Esc on `CaptureScreen` both call `EndBattle()` → returns to overworld
+- [x] Failed captures unchanged — orb animation plays, battle resumes normally
+
+
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
 
 ### 6.1 Class diagram updates (address lecturer feedback)
