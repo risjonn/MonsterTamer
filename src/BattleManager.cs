@@ -9,7 +9,8 @@ namespace MonsterTamer
         private Trainer        _opponent;
         private BattleResult   _result;
         private int            _turnNumber;
-        private List<string>   _battleLog;
+        private List<LogEntry> _battleLog;
+        private int            _lastTurnSeparatorFor;
         private WildMonster?   _wildTarget;  // set if battling a wild monster
         private BossMonster?   _bossTarget;  // set if battling the final boss
         private string         _lastPlayerMonsterName = "";
@@ -26,13 +27,14 @@ namespace MonsterTamer
         {
             _player     = player;
             _opponent   = opponent;
-            _result     = BattleResult.Ongoing;
-            _turnNumber = 1;
-            _battleLog  = new List<string>();
+            _result                = BattleResult.Ongoing;
+            _turnNumber            = 1;
+            _battleLog             = new List<LogEntry>();
+            _lastTurnSeparatorFor  = 0;
         }
 
-        public BattleResult   Result                  => _result;
-        public List<string>   BattleLog               => _battleLog;
+        public BattleResult    Result                  => _result;
+        public List<LogEntry>  BattleLog               => _battleLog;
         public int            TurnNumber              => _turnNumber;
         public Trainer        Opponent                => _opponent;
         public string         LastPlayerMonsterName   => _lastPlayerMonsterName;
@@ -65,6 +67,8 @@ namespace MonsterTamer
             if (moveIndex < 0 || moveIndex >= attacker.MoveSet.Length)
                 return "Invalid move!";
 
+            AddTurnSeparatorIfNew();
+
             // Apply burn/poison damage before acting; track whether damage was logged
             bool hadStatusDamage = attacker.Status == StatusCondition.Burned
                                 || attacker.Status == StatusCondition.Poisoned;
@@ -76,7 +80,7 @@ namespace MonsterTamer
                 string msg = $"{attacker.Name} is frozen solid!";
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
-                _battleLog.Add(msg);
+                _battleLog.Add(new LogEntry($"~ {msg}", LogEntryType.TurnSkip));
                 TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
@@ -88,25 +92,27 @@ namespace MonsterTamer
                 string msg = $"{attacker.Name} is paralysed and cannot move!";
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
-                _battleLog.Add(msg);
+                _battleLog.Add(new LogEntry($"~ {msg}", LogEntryType.TurnSkip));
                 TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
             }
 
             // Visual separator between status events and move execution
-            if (hadStatusDamage) _battleLog.Add("──");
+            if (hadStatusDamage) _battleLog.Add(new LogEntry("──", LogEntryType.Separator));
 
             StatusCondition defenderStatusBefore = defender.Status;
-            Move   selectedMove    = attacker.MoveSet[moveIndex];
-            int    hpBefore        = defender.Hp;
+            Move   selectedMove     = attacker.MoveSet[moveIndex];
+            int    hpBefore         = defender.Hp;
             int    attackerHpBefore = attacker.Hp;
-            string result          = selectedMove.Execute(attacker, defender);
-            int    damageDealt     = Math.Max(0, hpBefore - defender.Hp);
-            int    healAmount      = Math.Max(0, attacker.Hp - attackerHpBefore);
+
+            _battleLog.Add(new LogEntry($"> {attacker.Name} used {selectedMove.Name}!", LogEntryType.PlayerMove));
+            string result     = selectedMove.Execute(attacker, defender);
+            int    damageDealt = Math.Max(0, hpBefore - defender.Hp);
+            int    healAmount  = Math.Max(0, attacker.Hp - attackerHpBefore);
             if (damageDealt > 0) AttackHit?.Invoke(defender, damageDealt);
             if (healAmount  > 0) HealUsed?.Invoke(attacker, healAmount);
-            _battleLog.Add(result);
+            _battleLog.Add(new LogEntry($"* {result}", ResolveEffectType(damageDealt, healAmount, defenderStatusBefore, defender.Status)));
             if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
                 StatusApplied?.Invoke(defender, defender.Status);
             return result;
@@ -168,7 +174,7 @@ namespace MonsterTamer
                 string msg = $"{attacker.Name} is frozen solid!";
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
-                _battleLog.Add(msg);
+                _battleLog.Add(new LogEntry($"~ {msg}", LogEntryType.TurnSkip));
                 TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
@@ -180,24 +186,27 @@ namespace MonsterTamer
                 string msg = $"{attacker.Name} is paralysed and cannot move!";
                 StatusCondition prev = attacker.Status;
                 attacker.Status = StatusCondition.None;
-                _battleLog.Add(msg);
+                _battleLog.Add(new LogEntry($"~ {msg}", LogEntryType.TurnSkip));
                 TurnSkipped?.Invoke(attacker, prev);
                 StatusRemoved?.Invoke(attacker, prev);
                 return msg;
             }
 
             // Visual separator between status events and move execution
-            if (hadStatusDamage) _battleLog.Add("──");
+            if (hadStatusDamage) _battleLog.Add(new LogEntry("──", LogEntryType.Separator));
 
             StatusCondition defenderStatusBefore = defender.Status;
-            int    hpBefore        = defender.Hp;
+            Move   activeMove       = moveset[moveIndex];
+            int    hpBefore         = defender.Hp;
             int    attackerHpBefore = attacker.Hp;
-            string result          = moveset[moveIndex].Execute(attacker, defender);
-            int    damageDealt     = Math.Max(0, hpBefore - defender.Hp);
-            int    healAmount      = Math.Max(0, attacker.Hp - attackerHpBefore);
+
+            _battleLog.Add(new LogEntry($"< {attacker.Name} used {activeMove.Name}!", LogEntryType.EnemyMove));
+            string result      = activeMove.Execute(attacker, defender);
+            int    damageDealt = Math.Max(0, hpBefore - defender.Hp);
+            int    healAmount  = Math.Max(0, attacker.Hp - attackerHpBefore);
             if (damageDealt > 0) AttackHit?.Invoke(defender, damageDealt);
             if (healAmount  > 0) HealUsed?.Invoke(attacker, healAmount);
-            _battleLog.Add(result);
+            _battleLog.Add(new LogEntry($"* {result}", ResolveEffectType(damageDealt, healAmount, defenderStatusBefore, defender.Status)));
             if (defender.Status != defenderStatusBefore && defender.Status != StatusCondition.None)
                 StatusApplied?.Invoke(defender, defender.Status);
             return result;
@@ -212,16 +221,20 @@ namespace MonsterTamer
         public CaptureResult AttemptCapture(CaptureOrb orb)
         {
             if (_wildTarget == null) return CaptureResult.Failed;
+            AddTurnSeparatorIfNew();
             CaptureResult result = orb.AttemptCapture(_wildTarget);
-            _battleLog.Add(result == CaptureResult.Caught
-                ? $"{_wildTarget.Name} was caught!"
+            string msg = result == CaptureResult.Caught
+                ? $"* {_wildTarget.Name} was caught!"
                 : result == CaptureResult.Escaped
-                    ? $"{_wildTarget.Name} broke free!"
-                    : "The orb missed!");
+                    ? $"* {_wildTarget.Name} broke free!"
+                    : "* The orb missed!";
+            _battleLog.Add(new LogEntry(msg, LogEntryType.Capture));
             return result;
         }
 
-        public bool IsBattleOver()
+        // isEndOfRound = true only after the enemy half-turn so the turn counter
+        // advances exactly once per complete round (player action + enemy action).
+        public bool IsBattleOver(bool isEndOfRound = false)
         {
             TamedMonster? playerActive = _player.GetActiveMonster();
             if (playerActive == null || !playerActive.IsAlive)
@@ -239,7 +252,7 @@ namespace MonsterTamer
                 return true;
             }
 
-            _turnNumber++;
+            if (isEndOfRound) _turnNumber++;
             return false;
         }
 
@@ -251,24 +264,48 @@ namespace MonsterTamer
             switch (status)
             {
                 case StatusCondition.Burned:
-                    _battleLog.Add($"{m.Name} is hurt by its burn! (-{dmg} HP)");
+                    _battleLog.Add(new LogEntry($"~ {m.Name} is hurt by its burn! (-{dmg} HP)", LogEntryType.StatusDamage));
                     StatusDamage?.Invoke(m, status, dmg);
                     break;
                 case StatusCondition.Poisoned:
-                    _battleLog.Add($"{m.Name} is hurt by poison! (-{dmg} HP)");
+                    _battleLog.Add(new LogEntry($"~ {m.Name} is hurt by poison! (-{dmg} HP)", LogEntryType.StatusDamage));
                     StatusDamage?.Invoke(m, status, dmg);
                     break;
             }
         }
 
-        public void AddLog(string message)
+        private static LogEntryType ResolveEffectType(int damageDealt, int healAmount, StatusCondition before, StatusCondition after)
         {
-            _battleLog.Add(message);
+            if (damageDealt > 0) return LogEntryType.EffectDamage;
+            if (healAmount  > 0) return LogEntryType.Healing;
+            if (after != before && after != StatusCondition.None)
+                return after switch
+                {
+                    StatusCondition.Paralysed => LogEntryType.EffectParalyse,
+                    StatusCondition.Burned    => LogEntryType.EffectBurn,
+                    StatusCondition.Frozen    => LogEntryType.EffectFreeze,
+                    StatusCondition.Poisoned  => LogEntryType.EffectPoison,
+                    _                         => LogEntryType.System,
+                };
+            return LogEntryType.System;
+        }
+
+        public void AddLog(string message, LogEntryType type = LogEntryType.System)
+        {
+            _battleLog.Add(new LogEntry(message, type));
+        }
+
+        public void AddTurnSeparatorIfNew()
+        {
+            if (_turnNumber == _lastTurnSeparatorFor) return;
+            _battleLog.Add(new LogEntry($"-- Turn {_turnNumber} --", LogEntryType.TurnSeparator));
+            _lastTurnSeparatorFor = _turnNumber;
         }
 
         public void ClearLog()
         {
             _battleLog.Clear();
+            _lastTurnSeparatorFor = 0;
         }
     }
 }

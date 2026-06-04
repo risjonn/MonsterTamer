@@ -381,7 +381,7 @@ namespace MonsterTamer
                         _capturePartyMessage = added
                             ? $"{tamed.Name} was added to your party!"
                             : $"{tamed.Name} was released - Party full";
-                        _battleManager.AddLog(_capturePartyMessage);
+                        _battleManager.AddLog(_capturePartyMessage, LogEntryType.Capture);
                         _pendingCaptureEnd = true;
                         _captureEndTimer   = 140;
                         return;
@@ -396,7 +396,8 @@ namespace MonsterTamer
                         int hpBefore = active.Hp;
                         item.Use(active);
                         int healed = active.Hp - hpBefore;
-                        _battleManager.AddLog($"Used {item.Name} on {active.Name}!");
+                        _battleManager.AddTurnSeparatorIfNew();
+                        _battleManager.AddLog($"+ Used {item.Name} on {active.Name}!", LogEntryType.Healing);
 
                         if (healed > 0)
                         {
@@ -443,7 +444,8 @@ namespace MonsterTamer
                 {
                     _player.Party.SwapToFront(_selectedSwapIndex);
                     _playerHpDisplay = _player.GetActiveMonster()?.HpPercent ?? 1.0f;
-                    _battleManager.AddLog($"Go, {selected.Name}!");
+                    _battleManager.AddTurnSeparatorIfNew();
+                    _battleManager.AddLog($"* Go, {selected.Name}!");
                     // Swapping uses the player's turn — defer enemy turn
                     if (_battleManager.IsBattleOver())
                         ShowBattleResult();
@@ -481,7 +483,7 @@ namespace MonsterTamer
                     {
                         _pendingEnemyTurn = false;
                         _battleManager.EnemyTurn();
-                        if (_battleManager.IsBattleOver())
+                        if (_battleManager.IsBattleOver(isEndOfRound: true))
                             ShowBattleResult();
                     }
                 }
@@ -1479,14 +1481,15 @@ namespace MonsterTamer
             int logX = 590, logY = 430, logW = ScreenW - 606, logH = 278;
             SplashKit.FillRectangle(SplashKit.RGBAColor(10, 20, 8, 230), logX, logY, logW, logH);
             SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 60),      logX, logY, logW, logH);
-            SplashKit.DrawText("Battle log",
+            SplashKit.DrawText("Battle Log",
                 SplashKit.RGBColor(80, 130, 80), "Arial", 10, logX + 10, logY + 8);
 
-            List<string> log = _battleManager.BattleLog;
+            List<LogEntry> log = _battleManager.BattleLog;
             int wrapW = logW - 22;
-            var wrapped = new List<string>();
-            foreach (string entry in log)
-                wrapped.AddRange(WrapText(entry, "Arial", 10, wrapW));
+            var wrapped = new List<(string text, LogEntryType type)>();
+            foreach (LogEntry entry in log)
+                foreach (string line in WrapText(entry.Text, "Arial", 10, wrapW))
+                    wrapped.Add((line, entry.Type));
 
             int maxLines = 9;
             int wStart   = Math.Max(0, wrapped.Count - maxLines);
@@ -1494,8 +1497,27 @@ namespace MonsterTamer
             {
                 float alpha = 0.45f + (float)(i - wStart) / maxLines * 0.55f;
                 int   a     = (int)(alpha * 255);
-                SplashKit.DrawText(wrapped[i],
-                    SplashKit.RGBAColor(200, 220, 200, a), "Arial", 10,
+                var   (text, type) = wrapped[i];
+
+                var color = type switch
+                {
+                    LogEntryType.PlayerMove    => SplashKit.RGBAColor(140, 200, 255, a),
+                    LogEntryType.EnemyMove     => SplashKit.RGBAColor(255, 155, 70,  a),
+                    LogEntryType.StatusDamage  => SplashKit.RGBAColor(255, 190, 55,  a),
+                    LogEntryType.TurnSkip      => SplashKit.RGBAColor(225, 225, 75,  a),
+                    LogEntryType.TurnSeparator => SplashKit.RGBAColor(100, 130, 100, Math.Min(a, 150)),
+                    LogEntryType.Separator     => SplashKit.RGBAColor(80,  105, 80,  Math.Min(a, 120)),
+                    LogEntryType.Capture       => SplashKit.RGBAColor(255, 215, 0,   a),
+                    LogEntryType.Healing       => SplashKit.RGBAColor(90,  255, 140, a),
+                    LogEntryType.EffectDamage   => SplashKit.RGBAColor(255, 75,  75,  a),
+                    LogEntryType.EffectParalyse => SplashKit.RGBAColor(240, 230, 60,  a),
+                    LogEntryType.EffectBurn     => SplashKit.RGBAColor(255, 110, 40,  a),
+                    LogEntryType.EffectFreeze   => SplashKit.RGBAColor(120, 210, 255, a),
+                    LogEntryType.EffectPoison   => SplashKit.RGBAColor(190, 80,  230, a),
+                    _                          => SplashKit.RGBAColor(175, 185, 175, a),
+                };
+
+                SplashKit.DrawText(text, color, "Arial", 10,
                     logX + 10, logY + 26 + (i - wStart) * 26);
             }
         }

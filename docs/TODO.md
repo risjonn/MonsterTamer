@@ -1,18 +1,6 @@
 # TODO tasks
 
 
-### 5.9 Battle log improvements
-
-- [ ] Colour-code battle log entries:
-  - Player's move results: bright white or light blue
-  - Enemy's move results: orange or light red
-  - Status condition messages: colour matching the status (yellow, orange, blue, purple)
-  - System messages (battle start, capture result, turn skips): grey or italic style
-  - Damage numbers in log: red for damage taken, green for healing
-- [ ] Add a small icon prefix per log entry type (e.g. ">")
-- [ ] Show turn number at the start of each new turn as a separator in the log e.g. "── Turn 3 ──"
-- [ ] Most recent entry should be at the bottom and most visually prominent (full opacity), older entries fade
-
 ### 5.10 Battle screen tips and info
 
 - [ ] Add a small "Tips" panel or info line below the move panel showing:

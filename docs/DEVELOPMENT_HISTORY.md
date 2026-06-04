@@ -10,7 +10,7 @@ Entry point. Calls `GameManager.GetInstance().Run()`. Nothing else.
 
 ### Enumerations.cs
 
-All 7 enums in one file: `MonsterType`, `GameState`, `TrainerAction`, `StatusCondition`, `CaptureResult`, `ItemRarity`, `BattleResult`.
+All 8 enums in one file: `MonsterType`, `GameState`, `TrainerAction`, `StatusCondition`, `CaptureResult`, `ItemRarity`, `BattleResult`, `LogEntryType`.
 
 ### Monster.cs
 
@@ -366,6 +366,19 @@ Goal:
 - [x] Party message colour: cyan when added, amber when released (party full)
 - [x] Enter and Esc on `CaptureScreen` both call `EndBattle()` → returns to overworld
 - [x] Failed captures unchanged — orb animation plays, battle resumes normally
+
+
+### 5.9 Battle log improvements
+
+- [x] Colour-code battle log entries:
+  - Player's move results: bright white or light blue
+  - Enemy's move results: orange or light red
+  - Status condition messages: colour matching the status (yellow, orange, blue, purple)
+  - System messages (battle start, capture result, turn skips): grey or italic style
+  - Damage numbers in log: red for damage taken, green for healing
+- [x] Add a small icon prefix per log entry type (e.g. ">")
+- [x] Show turn number at the start of each new turn as a separator in the log e.g. "-- Turn 3 --"
+- [x] Most recent entry should be at the bottom and most visually prominent (full opacity), older entries fade
 
 
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)

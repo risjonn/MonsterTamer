@@ -28,7 +28,7 @@ namespace MonsterTamer
                 _    => ""
             };
 
-            return $"{caster.Name} used {Name}! {target.Name} took {finalDamage} damage!{effectiveness}";
+            return $"{target.Name} took {finalDamage} damage!{effectiveness}";
         }
 
         public override string GetMoveCategory() => "Attack";
@@ -46,7 +46,7 @@ namespace MonsterTamer
         {
             int amount = Power + (caster.Level * 2);
             caster.RestoreHp(amount);
-            return $"{caster.Name} used {Name}! Restored {amount} HP!";
+            return $"Restored {amount} HP!";
         }
 
         public override string GetMoveCategory() => "Heal";
@@ -75,7 +75,7 @@ namespace MonsterTamer
                 return $"{target.Name} resisted paralysis!";
 
             target.Status = _inflicts;
-            return $"{caster.Name} used {Name}! {target.Name} is now {_inflicts}!";
+            return $"{target.Name} is now {_inflicts}!";
         }
 
         public override string GetMoveCategory() => "Status";
