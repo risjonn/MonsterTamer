@@ -15,6 +15,7 @@ namespace MonsterTamer
         TrainerSpot, // walkable — triggers trainer battle
         RegionExit,  // walkable — moves to next region
         House,       // not walkable
+        Shop,        // walkable — opens shop UI
     }
 
     // One tile on the map
@@ -127,10 +128,11 @@ namespace MonsterTamer
         private bool _isCleared = false;
 
         // Events
-        public bool         WildEncounterTriggered { get; private set; }
+        public bool         WildEncounterTriggered    { get; private set; }
         public bool         TrainerEncounterTriggered { get; private set; }
-        public AITrainer?   TriggeredTrainer { get; private set; }
-        public bool         RegionExitTriggered { get; private set; }
+        public AITrainer?   TriggeredTrainer          { get; private set; }
+        public bool         RegionExitTriggered       { get; private set; }
+        public bool         ShopEncounterTriggered    { get; private set; }
 
         public OverworldPlayer Player => _player;
 
@@ -194,6 +196,7 @@ namespace MonsterTamer
             WildEncounterTriggered    = false;
             TrainerEncounterTriggered = false;
             RegionExitTriggered       = false;
+            ShopEncounterTriggered    = false;
             TriggeredTrainer          = null;
 
             if (_encounterCooldown > 0) _encounterCooldown--;
@@ -277,6 +280,10 @@ namespace MonsterTamer
                 _exitFading    = true;
                 _exitFadeAlpha = 0;
             }
+
+            // Shop tile — trigger once per new tile entry
+            if (current == TileType.Shop && newTile)
+                ShopEncounterTriggered = true;
 
             // Trainer spots — only trigger when cooldown is clear
             foreach (TrainerNPC npc in _trainers)
@@ -457,6 +464,14 @@ namespace MonsterTamer
                     SplashKit.FillTriangle(SplashKit.RGBColor(150, 60, 40),
                         x, y, x+w, y, x+w/2, y-h*0.4f);
                     break;
+
+                case TileType.Shop:
+                    SplashKit.FillRectangle(SplashKit.RGBColor(160, 120, 80), x, y, w, h);
+                    SplashKit.FillTriangle(SplashKit.RGBColor(255, 180, 30),
+                        x, y, x+w, y, x+w/2, y-h*0.4f);
+                    SplashKit.DrawText("$", SplashKit.RGBColor(255, 215, 0), "Arial", 10,
+                        x + w*0.3f, y + h*0.2f);
+                    break;
             }
         }
 
@@ -580,7 +595,7 @@ namespace MonsterTamer
     // Map factory — builds the actual maps for each region
     public static class MapFactory
     {
-        // T=Tree, G=Grass, g=TallGrass, W=Water, P=Path, N=TrainerSpot, X=Exit, H=House
+        // T=Tree, G=Grass, g=TallGrass, W=Water, P=Path, N=TrainerSpot, X=Exit, H=House, S=Shop
         private const int T = (int)TileType.Tree;
         private const int G = (int)TileType.Grass;
         private const int g = (int)TileType.TallGrass;
@@ -589,6 +604,7 @@ namespace MonsterTamer
         private const int N = (int)TileType.TrainerSpot;
         private const int X = (int)TileType.RegionExit;
         private const int H = (int)TileType.House;
+        private const int S = (int)TileType.Shop;
 
         public static OverworldMap CreateRainforestMap(List<TrainerNPC> trainers)
         {
@@ -597,7 +613,7 @@ namespace MonsterTamer
                 {T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T},
                 {T,G,G,G,G,T,T,g,g,g,g,g,T,T,G,G,G,G,G,G,G,G,T,T,T},
                 {T,G,H,H,G,G,T,g,g,g,g,g,T,G,G,G,G,G,G,G,G,G,G,T,T},
-                {T,G,H,H,G,G,G,G,g,g,g,G,G,G,G,G,T,T,G,G,G,G,G,T,T},
+                {T,G,H,H,S,G,G,G,g,g,g,G,G,G,G,G,T,T,G,G,G,G,G,T,T},
                 {T,G,G,G,G,G,G,G,G,G,G,G,G,G,G,T,T,T,G,G,G,G,G,T,T},
                 {T,T,G,G,P,P,P,P,P,P,P,P,P,P,G,T,T,G,G,G,G,g,g,T,T},
                 {T,T,G,G,P,T,T,T,T,T,T,T,T,P,G,G,G,G,g,g,g,g,g,T,T},
@@ -624,7 +640,7 @@ namespace MonsterTamer
             {
                 {T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T},
                 {T,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,T,T},
-                {T,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,T,T},
+                {T,G,G,S,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,T,T},
                 {T,G,G,T,T,G,G,G,G,g,g,g,G,G,G,G,G,T,T,G,G,G,G,T,T},
                 {T,G,G,T,T,G,G,G,G,g,g,g,G,G,G,G,T,T,T,G,G,G,G,T,T},
                 {T,G,G,G,G,G,G,G,G,G,G,G,G,G,G,T,T,T,G,G,G,G,G,T,T},
@@ -652,7 +668,7 @@ namespace MonsterTamer
             {
                 {T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T},
                 {T,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,G,T,T},
-                {T,G,G,G,G,T,T,G,G,G,G,G,G,G,G,G,T,T,G,G,G,G,G,T,T},
+                {T,G,G,S,G,T,T,G,G,G,G,G,G,G,G,G,T,T,G,G,G,G,G,T,T},
                 {T,G,G,T,T,T,T,G,g,g,g,G,G,G,G,T,T,T,G,G,G,G,G,T,T},
                 {T,G,G,T,T,T,G,G,g,g,g,G,G,G,T,T,T,G,G,G,G,G,G,T,T},
                 {T,G,G,G,G,G,G,G,G,G,G,G,G,T,T,T,G,G,G,G,g,g,G,T,T},

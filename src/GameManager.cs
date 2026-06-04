@@ -1,6 +1,7 @@
 using SplashKitSDK;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace MonsterTamer
@@ -18,11 +19,23 @@ namespace MonsterTamer
         private OverworldMap?   _overworldMap;
         private bool            _showingItemMenu   = false;
         private int             _selectedItemIndex = 0;
-        private bool            _showingSwapMenu    = false;
-        private int             _selectedSwapIndex  = 0;
+        private bool            _showingSwapMenu   = false;
+        private int             _selectedSwapIndex = 0;
+        private bool            _showingShop       = false;
+        private int             _selectedShopIndex = 0;
         private WildMonster?    _pendingEncounter        = null;
         private AITrainer?      _pendingTrainerEncounter = null;
         private AITrainer?      _lastTrainerBattled      = null;
+
+        private readonly Random _rng = new Random();
+
+        // Shop catalogue — name, gold cost, item factory
+        private readonly (string Name, int Cost, Func<Item> Create)[] _shopCatalog =
+        {
+            ("Potion",       50,  () => new Potion("Potion",       30,   ItemRarity.Common)),
+            ("Super Potion", 100, () => new Potion("Super Potion", 70,   ItemRarity.Rare)),
+            ("Capture Orb",  80,  () => new CaptureOrb("Capture Orb", 1.0f, ItemRarity.Common)),
+        };
 
         // Priority 4 — visual polish state
         private int             _battleAnimFrame     = 0;
@@ -37,6 +50,12 @@ namespace MonsterTamer
 
         // Active battle animations — updated and drawn each frame, pruned when complete
         private List<BattleAnimation> _battleAnimations = new();
+
+        // BGM — loaded once, swapped on state transitions
+        private Music? _overworldMusic = null;
+        private Music? _battleMusic    = null;
+        private bool   _bgmReady       = false;
+        private string _activeBgm      = "";
 
         // Inter-turn pacing — after player acts, enemy fires after _interTurnDelay frames
         private bool _pendingEnemyTurn = false;
@@ -160,6 +179,7 @@ namespace MonsterTamer
             SplashKit.CreateTimer("blink");
             SplashKit.StartTimer("blink");
             LoadMonsterSprites();
+            LoadBgm();
 
             while (!_window.CloseRequested)
             {
@@ -200,8 +220,13 @@ namespace MonsterTamer
                     _state = GameState.Overworld;
                 else if (_state == GameState.CaptureScreen)
                     EndBattle();
+                else if (_state == GameState.Overworld && _showingShop)
+                    _showingShop = false;
                 else if (_state == GameState.Overworld)
+                {
+                    StopBgm();
                     _state = GameState.MainMenu;
+                }
                 else
                     _window.Close();
                 return;
@@ -212,7 +237,10 @@ namespace MonsterTamer
                 case GameState.MainMenu:
                     if (SplashKit.KeyTyped(KeyCode.ReturnKey) ||
                         SplashKit.KeyTyped(KeyCode.SpaceKey))
+                    {
                         _state = GameState.Overworld;
+                        PlayBgm("overworld");
+                    }
                     break;
 
                 case GameState.EncounterPrompt:
@@ -261,9 +289,10 @@ namespace MonsterTamer
                     break;
             }
 
-            // Party screen accessible from overworld too
-            if (_state == GameState.Overworld &&
-                SplashKit.KeyTyped(KeyCode.PKey))
+            if (_state == GameState.Overworld && _showingShop)
+                HandleShopInput();
+            else if (_state == GameState.Overworld &&
+                     SplashKit.KeyTyped(KeyCode.PKey))
                 _state = GameState.PartyScreen;
         }
 
@@ -459,6 +488,25 @@ namespace MonsterTamer
             }
         }
 
+        private void HandleShopInput()
+        {
+            if (SplashKit.KeyTyped(KeyCode.UpKey)   || SplashKit.KeyTyped(KeyCode.WKey))
+                _selectedShopIndex = Math.Max(0, _selectedShopIndex - 1);
+            if (SplashKit.KeyTyped(KeyCode.DownKey) || SplashKit.KeyTyped(KeyCode.SKey))
+                _selectedShopIndex = Math.Min(_shopCatalog.Length - 1, _selectedShopIndex + 1);
+
+            if (SplashKit.KeyTyped(KeyCode.ReturnKey))
+            {
+                var (_, cost, create) = _shopCatalog[_selectedShopIndex];
+                if (_player.Gold >= cost)
+                {
+                    Item newItem = create();
+                    if (_player.Bag.AddItem(newItem))
+                        _player.SpendGold(cost);
+                }
+            }
+        }
+
         public void Update()
         {
             if (_state == GameState.Battle && _battleManager != null)
@@ -524,7 +572,7 @@ namespace MonsterTamer
                 }
             }
 
-            if (_state == GameState.Overworld && _overworldMap != null)
+            if (_state == GameState.Overworld && _overworldMap != null && !_showingShop)
             {
                 // Support both arrow keys and WASD for movement
                 bool up    = SplashKit.KeyDown(KeyCode.UpKey)    || SplashKit.KeyDown(KeyCode.WKey);
@@ -553,6 +601,11 @@ namespace MonsterTamer
                 {
                     AdvanceRegion();
                 }
+                else if (_overworldMap.ShopEncounterTriggered)
+                {
+                    _showingShop       = true;
+                    _selectedShopIndex = 0;
+                }
             }
         }
 
@@ -563,7 +616,7 @@ namespace MonsterTamer
             switch (_state)
             {
                 case GameState.MainMenu:        DrawMainMenu();                        break;
-                case GameState.Overworld:       DrawOverworld();                       break;
+                case GameState.Overworld:       DrawOverworld(); if (_showingShop) DrawShop(); break;
                 case GameState.EncounterPrompt: DrawOverworld(); DrawEncounterPrompt(); break;
                 case GameState.Battle:          DrawBattle();                          break;
                 case GameState.PartyScreen:     DrawPartyScreen();                     break;
@@ -588,6 +641,7 @@ namespace MonsterTamer
             _battleManager.AddLog($"{wild.GetBattleCry()}");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
             ResetBattleAnimState();
+            PlayBgm("battle");
             _state = GameState.Battle;
         }
 
@@ -601,6 +655,7 @@ namespace MonsterTamer
             _battleManager.AddLog($"Trainer {trainer.Name} wants to battle!");
             _battleManager.AddLog($"Go, {_player.GetActiveMonster()?.Name}!");
             ResetBattleAnimState();
+            PlayBgm("battle");
             _state = GameState.Battle;
         }
 
@@ -632,6 +687,7 @@ namespace MonsterTamer
             _battleManager.AddLog("NAGA BELIAN EMERGES FROM THE DEPTHS!");
             _battleManager.AddLog(nagaBelian.GetBattleCry());
             ResetBattleAnimState();
+            PlayBgm("battle");
             _state = GameState.Battle;
         }
 
@@ -645,11 +701,15 @@ namespace MonsterTamer
             if (_battleManager.Result == BattleResult.PlayerDied)
             {
                 _lastTrainerBattled = null;
+                StopBgm();
                 _state = GameState.GameOver;
                 return;
             }
             if (_battleManager.Result == BattleResult.PlayerWon)
             {
+                // Gold reward: 50–100 per win
+                _player.AddGold(50 + _rng.Next(51));
+
                 // Mark the specific NPC defeated on the map only after a real win
                 if (_lastTrainerBattled != null)
                     _overworldMap?.MarkTrainerDefeated(_lastTrainerBattled);
@@ -665,6 +725,7 @@ namespace MonsterTamer
                 }
             }
             _lastTrainerBattled = null;
+            PlayBgm("overworld");
             _state = GameState.Overworld;
         }
 
@@ -866,6 +927,84 @@ namespace MonsterTamer
         {
             if (_overworldMap != null)
                 _overworldMap.Draw(_window);
+
+            // Gold badge — top-right, above the map HUD
+            string goldText = $"Gold: {_player.Gold}G";
+            int    gtw      = SplashKit.TextWidth(goldText, "Arial", 11);
+            int    badgeX   = ScreenW - gtw - 30;
+            SplashKit.FillRectangle(SplashKit.RGBAColor(10, 40, 10, 200), badgeX - 10, 8, gtw + 20, 26);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(255, 215, 0),       badgeX - 10, 8, gtw + 20, 26);
+            SplashKit.DrawText(goldText, SplashKit.RGBColor(255, 215, 0), "Arial", 11, badgeX, 15);
+        }
+
+        private void DrawShop()
+        {
+            int cx    = ScreenW / 2;
+            int cardW = 560, cardH = 380;
+            int cardX = cx - cardW / 2, cardY = 170;
+
+            // Dim background
+            SplashKit.FillRectangle(SplashKit.RGBAColor(0, 0, 0, 170), 0, 0, ScreenW, ScreenH);
+
+            // Card
+            SplashKit.FillRectangle(SplashKit.RGBAColor(30, 20, 5, 245), cardX, cardY, cardW, cardH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(255, 215, 0),      cardX, cardY, cardW, cardH);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(180, 130, 30),     cardX + 3, cardY + 3, cardW - 6, cardH - 6);
+
+            // Header strip
+            SplashKit.FillRectangle(SplashKit.RGBAColor(180, 110, 10, 200), cardX + 1, cardY + 1, cardW - 2, 36);
+            string title = "SHOP";
+            int    titleW = SplashKit.TextWidth(title, "Arial", 18);
+            SplashKit.DrawText(title, SplashKit.RGBColor(255, 215, 0), "Arial", 18, cx - titleW / 2, cardY + 9);
+
+            // Player gold
+            string goldText = $"Gold: {_player.Gold}G";
+            int    goldTw   = SplashKit.TextWidth(goldText, "Arial", 13);
+            SplashKit.DrawText(goldText, SplashKit.RGBColor(255, 215, 0), "Arial", 13, cx - goldTw / 2, cardY + 48);
+
+            // Item rows
+            int listY = cardY + 76;
+            for (int i = 0; i < _shopCatalog.Length; i++)
+            {
+                var (name, cost, _) = _shopCatalog[i];
+                bool sel       = (i == _selectedShopIndex);
+                bool canAfford = (_player.Gold >= cost);
+                int  itemX     = cardX + 20;
+                int  itemW     = cardW - 40;
+                int  itemY     = listY + i * 82;
+
+                SplashKit.FillRectangle(
+                    sel ? SplashKit.RGBColor(80, 60, 10) : SplashKit.RGBColor(40, 30, 5),
+                    itemX, itemY, itemW, 70);
+                SplashKit.DrawRectangle(
+                    sel ? SplashKit.RGBColor(255, 215, 0) : SplashKit.RGBColor(140, 100, 20),
+                    itemX, itemY, itemW, 70);
+
+                Color nameC = canAfford ? SplashKit.ColorWhite() : SplashKit.RGBColor(140, 120, 80);
+                SplashKit.DrawText(name, nameC, "Arial", 15, itemX + 12, itemY + 10);
+
+                string costStr = $"{cost}G";
+                Color  costC   = canAfford
+                    ? SplashKit.RGBColor(255, 215, 0)
+                    : SplashKit.RGBColor(180, 80, 80);
+                SplashKit.DrawText(costStr, costC, "Arial", 13, itemX + 12, itemY + 38);
+
+                if (!canAfford)
+                    SplashKit.DrawText("Not enough gold",
+                        SplashKit.RGBColor(180, 80, 80), "Arial", 10, itemX + 90, itemY + 40);
+
+                if (sel)
+                    SplashKit.DrawText(">",
+                        SplashKit.RGBColor(255, 215, 0), "Arial", 15, cardX + 6, itemY + 10);
+            }
+
+            // Controls hint
+            SplashKit.DrawLine(SplashKit.RGBColor(100, 70, 10),
+                cardX + 20, cardY + cardH - 36, cardX + cardW - 20, cardY + cardH - 36);
+            string hint = "Up/Down: Select     Enter: Buy     Esc: Leave";
+            int    hintW = SplashKit.TextWidth(hint, "Arial", 11);
+            SplashKit.DrawText(hint, SplashKit.RGBColor(160, 140, 80), "Arial", 11,
+                cx - hintW / 2, cardY + cardH - 24);
         }
 
         private void DrawEncounterPrompt()
@@ -1196,6 +1335,31 @@ namespace MonsterTamer
 
             foreach (var (monsterName, filename) in nameToFile)
                 _monsterSprites[monsterName] = SplashKit.LoadBitmap(filename, filename + ".png");
+        }
+
+        private void LoadBgm()
+        {
+            string audioDir = Path.Combine(Directory.GetCurrentDirectory(), "resources", "audio");
+            _overworldMusic = SplashKit.LoadMusic("overworld", Path.Combine(audioDir, "overworld.ogg"));
+            _battleMusic    = SplashKit.LoadMusic("battle",    Path.Combine(audioDir, "battle.ogg"));
+            _bgmReady = true;
+        }
+
+        private void PlayBgm(string name)
+        {
+            if (!_bgmReady || _activeBgm == name) return;
+            SplashKit.StopMusic();
+            _activeBgm = name;
+            if (name == "overworld" && _overworldMusic != null)
+                SplashKit.PlayMusic(_overworldMusic, -1);
+            else if (name == "battle" && _battleMusic != null)
+                SplashKit.PlayMusic(_battleMusic, -1);
+        }
+
+        private void StopBgm()
+        {
+            SplashKit.StopMusic();
+            _activeBgm = "";
         }
 
         private void DrawMonsterSprite(string name, float cx, float cy, bool isPlayer, float baseSize = 180f)

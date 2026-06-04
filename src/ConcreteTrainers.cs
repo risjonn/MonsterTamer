@@ -6,11 +6,27 @@ namespace MonsterTamer
     {
         private int _selectedMoveIndex;
         private int _selectedPartyIndex;
+        private int _gold;
 
         public PlayerTrainer(string name) : base(name)
         {
             _selectedMoveIndex  = 0;
             _selectedPartyIndex = 0;
+            _gold               = 50;
+        }
+
+        public int Gold => _gold;
+
+        public void AddGold(int amount)
+        {
+            if (amount > 0) _gold += amount;
+        }
+
+        public bool SpendGold(int amount)
+        {
+            if (amount > _gold) return false;
+            _gold -= amount;
+            return true;
         }
 
         public int SelectedMoveIndex

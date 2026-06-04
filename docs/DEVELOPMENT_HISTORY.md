@@ -88,7 +88,6 @@ Screens implemented: MainMenu (redesigned for 1280×720 with title card, 4-col r
 
 Priority 4 visual features active: region-specific battle backgrounds, monster entrance slide-in animation (`_battleAnimFrame`), animated HP bar lerp (`_playerHpDisplay` / `_enemyHpDisplay`), `ShowBattleResult()` colour-coded overlay (2.5s, Enter to skip), animated twinkling stars + fireflies on main menu.
 
-
 ## Priority 1 — Critical bugs to fix
 
 - [x] **Overworld movement** — both arrow keys and WASD work; SDL KeyCode values confirmed correct (UpKey=273 etc.)
@@ -121,19 +120,22 @@ Priority 4 visual features active: region-specific battle backgrounds, monster e
 ## Priority 5 — UI/UX Polish & Gameplay Improvements (CURRENT FOCUS)
 
 ### 5.1 Window size
+
 - [x] Increase window size to at least 1280×720 — window now 1280×720
 - [x] After resizing, re-anchor all hardcoded x/y draw positions relative to screen width/height constants — all draw methods in GameManager updated; OverworldMap camera, tile skip, HUD, and fade overlay updated
 - [x] Define `ScreenW` and `ScreenH` as constants at the top of GameManager and OverworldMap, referenced throughout all draw calls instead of hardcoded 800/600
 
 ### 5.2 Main menu redesign
+
 - [x] Redesign main menu layout — centre-align all elements vertically and horizontally relative to 1280×720
 - [x] Add a styled title card with a decorative double-border panel behind the game title (700px wide, centred)
 - [x] Align monster roster list into a clean 4-column grid with consistent 200px column spacing
 - [x] Add a brief one-line tagline "Explore Sarawak. Tame the Wild. Become a Guardian." below the title
 - [x] Blinking "Press Enter to Start" prompt is clearly separated from the monster list and visually prominent (boxed, centred)
-- [x] Key hints at the bottom bar: "Enter: Start  Esc: Quit  P: Party Screen"
+- [x] Key hints at the bottom bar: "Enter: Start Esc: Quit P: Party Screen"
 
 #### 5.1/5.2 Visual bug fixes applied (2026-06-03)
+
 - [x] Main menu title "Monster Tamer" and "Guardians of Sarawak" now centred using `SplashKit.TextWidth()` — previously used hardcoded offset estimates
 - [x] "Press Enter to Start" text centred within blinking box using `TextWidth()`
 - [x] Unicode star (★), middle dot (·), and em dash (—) replaced with ASCII `*` and `-` — SplashKit renders these as "?"
@@ -154,8 +156,8 @@ Remaining issues:
 Goal:
 [x] Resolve all remaining battle UI issues before starting Priority 5.3.
 
-
 ### 5.3 Wild encounter prompt (do not auto-start battle)
+
 - [x] When player walks into tall grass and a wild monster triggers, do NOT immediately start the battle
 - [x] Instead show an encounter prompt overlay on the overworld screen with:
   - Monster name, level, and type badges
@@ -165,21 +167,21 @@ Goal:
 - [x] Only transition to `GameState.Battle` if the player selects Fight
 - [x] If player selects Run, dismiss the prompt and apply a longer encounter cooldown (~5 seconds)
 
+### 5.4 Monster sprite improvements (battle screen)
 
-### 5.4 Monster sprite improvements (battle screen) 
-- [x] Review each monster's geometric sprite and improve proportions — specifically: 
-  - Kelabit: make casque ridge more prominent, wing span wider 
-  - Bekantan: big nose should be the most prominent feature 
-  - Mawas: longer arms reaching the ground 
-  - Rajah: wings should dominate the sprite, more colour contrast 
-  - Buaya: longer body, more visible teeth row 
-  - Temaju: clearer scale pattern layering 
-  - Pelanduk: taller ears relative to body 
-  - Enggang: rounder bear body, more visible yellow chest patch 
+- [x] Review each monster's geometric sprite and improve proportions — specifically:
+  - Kelabit: make casque ridge more prominent, wing span wider
+  - Bekantan: big nose should be the most prominent feature
+  - Mawas: longer arms reaching the ground
+  - Rajah: wings should dominate the sprite, more colour contrast
+  - Buaya: longer body, more visible teeth row
+  - Temaju: clearer scale pattern layering
+  - Pelanduk: taller ears relative to body
+  - Enggang: rounder bear body, more visible yellow chest patch
 - [x] Add a subtle idle animation (slight vertical bob, 1-2px oscillation using timer ticks) - [x] Enemy sprite (back/front view) should be slightly larger than player sprite to indicate it is the focus
 
-
 ### 5.4 Monster sprite asset migration
+
 - [x] Replace the manually drawn SplashKit geometric monster sprites with PNG sprite assets stored in Resources/Images
 - [x] Use the following sprite assets:
   - bekantan.png
@@ -210,7 +212,6 @@ Goal:
   - do not reload every frame
 - [x] Remove or retire obsolete geometric sprite rendering code if no longer required
 - [x] Preserve all existing gameplay behaviour and UI layouts
-
 
 ### 5.5 UI Layout & Readability Pass
 
@@ -267,7 +268,6 @@ Goal:
   - Ensure all UI remains readable at 1280×720
   - Preserve existing functionality and animations
 
-
 ### 5.6 Status condition logic fix
 
 - [x] **Paralysed**:
@@ -297,7 +297,6 @@ Goal:
   - TurnSkipped
   - StatusRemoved
 
-
 ### 5.7a Battle animation framework & attack animations
 
 - [x] New `BattleAnimation` abstract class in `src/BattleAnimation.cs` — `_frame`, `_duration`, `IsComplete`, concrete `Update()`, abstract `Draw()`
@@ -310,7 +309,6 @@ Goal:
 - [x] `ResetBattleAnimState()` clears animation list on battle start
 - [x] All animations are non-blocking — no `Thread.Sleep`, only frame counters
 - [x] Reuse hooks ready for 5.7b: `StatusApplied`, `StatusDamage`, `TurnSkipped`, `StatusRemoved` events already wired in `BattleManager`
-
 
 ### 5.7b Heal, status & turn-skip animations
 
@@ -338,15 +336,15 @@ Goal:
   - Use frame counters only
   - Work for both player and enemy monsters
 
-
 ### 5.7c Capture & item animations
+
 - [x] Capture orb animation:
   - Orb travels from player side toward enemy
   - Orb expands on contact
   - Show result:
     - "Caught!" in gold
     - "Escaped!" in red
-- [x] Potion animation: 
+- [x] Potion animation:
   - Green glow around target monster
   - Floating "+X HP" text
 - [x] Reuse animation framework from Priority 5.7a
@@ -354,7 +352,6 @@ Goal:
   - Be non-blocking
   - Use frame counters only
   - Work correctly with existing battle flow
-
 
 ### 5.8 Capture result screen
 
@@ -367,7 +364,6 @@ Goal:
 - [x] Enter and Esc on `CaptureScreen` both call `EndBattle()` → returns to overworld
 - [x] Failed captures unchanged — orb animation plays, battle resumes normally
 
-
 ### 5.9 Battle log improvements
 
 - [x] Colour-code battle log entries:
@@ -379,7 +375,6 @@ Goal:
 - [x] Add a small icon prefix per log entry type (e.g. ">")
 - [x] Show turn number at the start of each new turn as a separator in the log e.g. "-- Turn 3 --"
 - [x] Most recent entry should be at the bottom and most visually prominent (full opacity), older entries fade
-
 
 ### 5.10 Battle screen tips and info
 
@@ -397,15 +392,42 @@ Goal:
   - Capture chance should update dynamically as enemy HP changes
 - [x] Highlight the currently selected move's type badge more prominently when it would be super effective against the enemy
 
+### 5.11 Item replenishment / shop system (Optional enhancement)
+
+- [x] Add a `ShopTile` in overworld maps (region-based placement near start or key locations)
+  - Stepping on a ShopTile opens shop UI
+  - Exiting shop returns to overworld state
+- [x] Shop inventory (fixed, always available):
+  - Potion — restores 30 HP — free or costs game currency
+  - Super Potion — restores 60 HP — higher cost
+  - Capture Orb — standard catch modifier — standard cost
+  - Status Cure — cures any status — standard cost
+- [x] Add a `_gold` field to `PlayerTrainer` — player earns gold by winning battles (e.g. 50–100 gold per win)
+- [x] Shop UI: simple list with item name, description, cost, and current gold shown — arrow keys to select, Enter to buy, Esc to exit
+
+### 5.12 Audio Improvements
+
+- [x] Add background music (BGM) system using existing audio files in:
+      `resources/audio/`
+- [ ] Use the following tracks:
+  - `overworld.ogg` → plays during overworld gameplay
+  - `battle.ogg` → plays during battle state
+- [x] Audio behavior requirements:
+  - Overworld BGM loops continuously while in overworld state
+  - Battle BGM loops continuously while in battle state
+  - Smooth transition between tracks when switching states
+  - Prevent overlapping audio (only one BGM playing at any time)
+  - Stop current track before starting new track on state change
 
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
 
 ### 6.1 Class diagram updates (address lecturer feedback)
+
 - [ ] Add abstract methods to abstract class boxes in italics:
-  - Monster: *GetBattleCry()*, *GetDescription()*
-  - Move: *Execute()*, *GetMoveCategory()*
-  - Item: *Use()*, *GetDescription()*
-  - Trainer: *ChooseAction()*
+  - Monster: _GetBattleCry()_, _GetDescription()_
+  - Move: _Execute()_, _GetMoveCategory()_
+  - Item: _Use()_, _GetDescription()_
+  - Trainer: _ChooseAction()_
 - [ ] Add overriding methods to each child class box (same method names, not italicised)
 - [ ] Add fields inside class boxes that justify relationship arrows:
   - PlayerTrainer box: show `_party : Party`, `_bag : Inventory`
@@ -423,10 +445,12 @@ Goal:
 ### 6.3 Additional features section (already rewritten — verify it matches final code)
 
 ### 6.4 Sample output
+
 - [ ] Take new screenshots showing: main menu, overworld movement, encounter prompt, battle screen with animations, capture result screen, party screen, shop
 - [ ] Consider a short screen recording (GIF or MP4) showing a full gameplay loop
 
 ### 6.5 Required Roles tables — add missing classes
+
 - [ ] Add table for `BattleState` class
 - [ ] Add table for `BattleResult` enum
 - [ ] Add table for `MonsterFactory` (static class, Factory Pattern)
@@ -437,6 +461,7 @@ Goal:
 - [ ] Add table for `MapFactory` (static class)
 
 ### 6.6 Final playthrough checklist
+
 - [ ] MainMenu → Enter → Overworld loads correctly
 - [ ] WASD/Arrow movement works, camera follows player
 - [ ] Walking into tall grass triggers encounter prompt (not instant battle)

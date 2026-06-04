@@ -1,14 +1,10 @@
 # TODO tasks
 
+### 5.13 Trainer & Region Boss Polish Improvements
 
-### 5.11 Item replenishment / shop system (Optional enhancement)
-
-- [ ] Add a `ShopState` (`GameState.Shop`) accessible from the overworld (e.g. press B for bag/shop, or place a shop tile on the map near the region start)
-- [ ] Shop inventory (fixed, always available):
-  - Potion — restores 30 HP — free or costs game currency
-  - Super Potion — restores 60 HP — higher cost
-  - Capture Orb — standard catch modifier — standard cost
-  - Status Cure — cures any status — standard cost
-- [ ] Add a `_gold` field to `PlayerTrainer` — player earns gold by winning battles (e.g. 50–100 gold per win)
-- [ ] Shop UI: simple list with item name, description, cost, and current gold shown — arrow keys to select, Enter to buy, Esc to exit
-- [ ] Alternatively (simpler): place a `ShopTile` on each region map — stepping on it opens the shop
+- [ ] Replace manually drawn overworld visuals with sprite-based rendering
+  - Change "Trainer Siti" name to "Trainer Lili"
+  - Replace trainer rendering (currently SplashKit drawn shapes) with PNG sprite
+  - Replace boss/region visual elements with PNG sprite assets
+  - Ensure sprites follow same positioning logic as current rendering
+  - Maintain existing collision / interaction logic (visual change only)
