@@ -39,7 +39,7 @@ namespace MonsterTamer
         // Overrides abstract method — Polymorphism
         public override string GetDescription()
         {
-            return $"{Name} — Capture modifier: {_captureModifier:F1}x";
+            return $"{Name} - Capture modifier: {_captureModifier:F1}x";
         }
     }
 
@@ -63,7 +63,7 @@ namespace MonsterTamer
 
         public override string GetDescription()
         {
-            return $"{Name} — Restores {_healAmount} HP";
+            return $"{Name} - Restores {_healAmount} HP";
         }
     }
 
@@ -88,7 +88,7 @@ namespace MonsterTamer
 
         public override string GetDescription()
         {
-            return $"{Name} — Cures {_cures}";
+            return $"{Name} - Cures {_cures}";
         }
     }
 }

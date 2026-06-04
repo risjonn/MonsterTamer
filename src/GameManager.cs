@@ -19,6 +19,7 @@ namespace MonsterTamer
         private OverworldMap?   _overworldMap;
         private bool            _showingItemMenu   = false;
         private int             _selectedItemIndex = 0;
+        private int             _bagScrollOffset   = 0;
         private bool            _showingSwapMenu   = false;
         private int             _selectedSwapIndex = 0;
         private bool            _showingShop       = false;
@@ -333,6 +334,7 @@ namespace MonsterTamer
                 {
                     _showingItemMenu   = true;
                     _selectedItemIndex = 0;
+                    _bagScrollOffset   = 0;
                 }
                 if (SplashKit.KeyTyped(KeyCode.XKey))
                 {
@@ -368,6 +370,12 @@ namespace MonsterTamer
                 _selectedItemIndex = Math.Max(0, _selectedItemIndex - 1);
             if (SplashKit.KeyTyped(KeyCode.DownKey) || SplashKit.KeyTyped(KeyCode.RightKey))
                 _selectedItemIndex = Math.Min(Math.Max(0, items.Count - 1), _selectedItemIndex + 1);
+
+            // Keep selected item inside the 4-slot visible window
+            if (_selectedItemIndex < _bagScrollOffset)
+                _bagScrollOffset = _selectedItemIndex;
+            else if (_selectedItemIndex >= _bagScrollOffset + 4)
+                _bagScrollOffset = _selectedItemIndex - 3;
 
             if (SplashKit.KeyTyped(KeyCode.CKey))
             {
@@ -696,6 +704,7 @@ namespace MonsterTamer
             if (_battleManager == null) return;
             _showingItemMenu   = false;
             _selectedItemIndex = 0;
+            _bagScrollOffset   = 0;
             _showingSwapMenu   = false;
             _selectedSwapIndex = 0;
             if (_battleManager.Result == BattleResult.PlayerDied)
@@ -915,12 +924,14 @@ namespace MonsterTamer
 
             // ── Bottom hints bar ─────────────────────────────────────────────────
             SplashKit.FillRectangle(SplashKit.RGBAColor(0, 0, 0, 110), 0, ScreenH - 38, ScreenW, 38);
-            SplashKit.DrawText("Enter: Start          Esc: Quit          P: Party Screen",
-                SplashKit.RGBColor(100, 160, 110), "Arial", 11, cx - 215, ScreenH - 22);
+            string hintsText = "Enter: Start          Esc: Quit";
+            int    hintsW    = SplashKit.TextWidth(hintsText, "Arial", 11);
+            SplashKit.DrawText(hintsText,
+                SplashKit.RGBColor(100, 160, 110), "Arial", 11, cx - hintsW / 2, ScreenH - 26);
 
             // Corner credit
-            SplashKit.DrawText("Option 4  ·  C# with SplashKit",
-                SplashKit.RGBColor(45, 106, 79), "Arial", 10, ScreenW - 284, ScreenH - 22);
+            SplashKit.DrawText("Option 4  |  C# with SplashKit",
+                SplashKit.RGBColor(45, 106, 79), "Arial", 10, ScreenW - 284, ScreenH - 26);
         }
 
         private void DrawOverworld()
@@ -1669,7 +1680,7 @@ namespace MonsterTamer
             SplashKit.DrawText("Bag:",
                 SplashKit.RGBColor(140, 200, 255), "Arial", 11, 26, 462);
             SplashKit.DrawText("[C] Back",
-                SplashKit.RGBColor(100, 140, 180), "Arial", 10, 508, 462);
+                SplashKit.RGBColor(100, 140, 180), "Arial", 10, 486, 462);
 
             if (items.Count == 0)
             {
@@ -1678,36 +1689,80 @@ namespace MonsterTamer
                 return;
             }
 
-            for (int i = 0; i < Math.Min(items.Count, 4); i++)
+            bool canScrollUp   = _bagScrollOffset > 0;
+            bool canScrollDown = _bagScrollOffset + 4 < items.Count;
+
+            if (canScrollUp)
+                SplashKit.DrawText($"^ {_bagScrollOffset} above",
+                    SplashKit.RGBColor(100, 180, 255), "Arial", 10, 220, 463);
+
+            // Slots match move panel: 260x90, column step 272, row step 102
+            int visibleCount = Math.Min(4, items.Count - _bagScrollOffset);
+            for (int vi = 0; vi < visibleCount; vi++)
             {
-                bool sel = (i == _selectedItemIndex);
-                int  col = i % 2, row = i / 2;
+                int itemIndex = _bagScrollOffset + vi;
+                bool sel = (itemIndex == _selectedItemIndex);
+                int  col = vi % 2, row = vi / 2;
                 int  bx  = 26  + col * 272;
-                int  by  = 478 + row * 124;
+                int  by  = 478 + row * 102;
 
                 SplashKit.FillRectangle(
                     sel ? SplashKit.RGBColor(25, 58, 110)
                         : SplashKit.RGBColor(15, 36, 70),
-                    bx, by, 260, 108);
+                    bx, by, 260, 90);
                 SplashKit.DrawRectangle(
                     sel ? SplashKit.RGBColor(0, 190, 255)
                         : SplashKit.RGBColor(50, 100, 170),
-                    bx, by, 260, 108);
+                    bx, by, 260, 90);
 
-                Item  item  = items[i];
+                Item  item  = items[itemIndex];
                 Color nameC = sel ? SplashKit.RGBColor(0, 220, 255) : SplashKit.ColorWhite();
-                SplashKit.DrawText(item.Name, nameC, "Arial", 13, bx + 10, by + 12);
-                string desc = item.GetDescription();
-                if (desc.Length > 32) desc = desc.Substring(0, 29) + "...";
-                SplashKit.DrawText(desc,
-                    SplashKit.RGBColor(120, 170, 210), "Arial", 10, bx + 10, by + 38);
-                SplashKit.DrawText($"Rarity: {item.Rarity}",
-                    SplashKit.RGBColor(100, 140, 180), "Arial", 10, bx + 10, by + 60);
+                SplashKit.DrawText(item.Name, nameC, "Arial", 13, bx + 10, by + 8);
+
+                // Word-wrap description into at most 2 lines (240px max width at Arial 10)
+                string desc     = item.GetDescription();
+                string descLine1 = "", descLine2 = "";
+                bool   onLine2   = false;
+                foreach (string word in desc.Split(' '))
+                {
+                    if (!onLine2)
+                    {
+                        string candidate = descLine1.Length == 0 ? word : descLine1 + " " + word;
+                        if (SplashKit.TextWidth(candidate, "Arial", 10) <= 240)
+                            descLine1 = candidate;
+                        else
+                        {
+                            onLine2   = true;
+                            descLine2 = word;
+                        }
+                    }
+                    else
+                    {
+                        string candidate2 = descLine2.Length == 0 ? word : descLine2 + " " + word;
+                        if (SplashKit.TextWidth(candidate2, "Arial", 10) <= 240)
+                            descLine2 = candidate2;
+                    }
+                }
+
+                Color descC = SplashKit.RGBColor(120, 170, 210);
+                SplashKit.DrawText(descLine1, descC, "Arial", 10, bx + 10, by + 28);
+                if (descLine2.Length > 0)
+                {
+                    SplashKit.DrawText(descLine2, descC, "Arial", 10, bx + 10, by + 42);
+                    SplashKit.DrawText($"Rarity: {item.Rarity}",
+                        SplashKit.RGBColor(100, 140, 180), "Arial", 10, bx + 10, by + 57);
+                }
+                else
+                {
+                    SplashKit.DrawText($"Rarity: {item.Rarity}",
+                        SplashKit.RGBColor(100, 140, 180), "Arial", 10, bx + 10, by + 44);
+                }
             }
 
-            if (items.Count > 4)
-                SplashKit.DrawText($"... and {items.Count - 4} more",
-                    SplashKit.RGBColor(100, 140, 180), "Arial", 10, 26, 714);
+            // Footer: scroll-down indicator and control hint (below last slot row at y=670)
+            if (canScrollDown)
+                SplashKit.DrawText($"v {items.Count - _bagScrollOffset - 4} below",
+                    SplashKit.RGBColor(100, 180, 255), "Arial", 10, 220, 677);
         }
 
         private void DrawSwapPanel()
