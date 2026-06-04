@@ -419,6 +419,36 @@ Goal:
   - Prevent overlapping audio (only one BGM playing at any time)
   - Stop current track before starting new track on state change
 
+### 5.13 Trainer & Region Boss Sprite Upgrade
+
+- [x] Replace overworld manually drawn visuals with PNG sprite rendering from:
+  `resources/images/`
+
+- [x] Trainer update:
+  - Rename "Ranger Siti" → "Ranger Lili"
+  - Use sprite-based rendering for trainer:
+    - trainer.png (default/down)
+    - trainer_back.png (up)
+    - trainer_left.png
+    - trainer_right.png
+  - Movement direction rule:
+    - Trainer sprite MUST update based on last movement direction
+    - Moving up → use trainer_back.png
+    - Moving down → use trainer.png
+    - Moving left → use trainer_left.png
+    - Moving right → use trainer_right.png
+    - Sprite must persist direction when idle (no movement)
+
+- [x] Region boss sprites:
+  - Ranger Lili → ranger_lili.png
+  - Ranger Azman → ranger_azman.png
+  - Champion Dayak → champion_dayak.png
+
+- [x] Requirements:
+  - Sprites must follow existing overworld positioning/grid logic
+  - Maintain current movement and collision system (visual replacement only)
+  - Ensure correct sprite selection is fully driven by movement direction state
+
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
 
 ### 6.1 Class diagram updates (address lecturer feedback)

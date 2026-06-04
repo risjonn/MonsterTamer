@@ -125,7 +125,7 @@ namespace MonsterTamer
             rainforest.AddEncounter(MonsterFactory.CreateBekantan());
             rainforest.AddEncounter(MonsterFactory.CreatePelanduk());
             rainforest.AddEncounter(MonsterFactory.CreateRajah());
-            AITrainer t1 = new AITrainer("Ranger Siti", 1);
+            AITrainer t1 = new AITrainer("Ranger Lili", 1);
             t1.Party.AddMonster(MonsterFactory.CreateBekantanTamed(10));
             t1.Party.AddMonster(MonsterFactory.CreatePelandukTamed(9));
             rainforest.AddTrainer(t1);
@@ -926,7 +926,7 @@ namespace MonsterTamer
         private void DrawOverworld()
         {
             if (_overworldMap != null)
-                _overworldMap.Draw(_window);
+                _overworldMap.Draw(_window, _monsterSprites);
 
             // Gold badge — top-right, above the map HUD
             string goldText = $"Gold: {_player.Gold}G";
@@ -1335,6 +1335,20 @@ namespace MonsterTamer
 
             foreach (var (monsterName, filename) in nameToFile)
                 _monsterSprites[monsterName] = SplashKit.LoadBitmap(filename, filename + ".png");
+
+            var overworldFiles = new Dictionary<string, string>
+            {
+                ["trainer"]        = "trainer",
+                ["trainer_back"]   = "trainer_back",
+                ["trainer_left"]   = "trainer_left",
+                ["trainer_right"]  = "trainer_right",
+                ["ranger_lili"]    = "ranger_lili",
+                ["ranger_azman"]   = "ranger_azman",
+                ["champion_dayak"] = "champion_dayak",
+            };
+
+            foreach (var (key, filename) in overworldFiles)
+                _monsterSprites[key] = SplashKit.LoadBitmap(filename, filename + ".png");
         }
 
         private void LoadBgm()

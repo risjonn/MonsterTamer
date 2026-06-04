@@ -338,7 +338,7 @@ namespace MonsterTamer
             }
         }
 
-        public void Draw(Window window)
+        public void Draw(Window window, Dictionary<string, Bitmap> sprites)
         {
             // Scale tiles to fill the full window (25×20 map = 800×640 < 1280×720)
             float mapPixW = MapWidth  * TileSize;
@@ -365,20 +365,22 @@ namespace MonsterTamer
                 }
             }
 
-            // Draw trainer NPCs
+            // Draw trainer NPCs — pass tile centre in screen-space
             foreach (TrainerNPC npc in _trainers)
             {
                 if (npc.Defeated) continue;
-                float sx = npc.X * scaleX - offX;
-                float sy = npc.Y * scaleY - offY;
-                if (sx < -32 || sx > ScreenW + 32 || sy < -32 || sy > ScreenH + 32) continue;
-                DrawTrainerNPC(sx, sy, npc.Label, spriteS);
+                float scx = npc.X * scaleX - offX + drawW / 2f;
+                float scy = npc.Y * scaleY - offY + drawH / 2f;
+                if (scx < -128 || scx > ScreenW + 128 || scy < -128 || scy > ScreenH + 128) continue;
+                DrawTrainerNPC(scx, scy, npc.Label, spriteS, sprites);
             }
 
-            // Draw player
+            // Draw player — pass bounding-box centre in screen-space
             float px = _player.X * scaleX - offX;
             float py = _player.Y * scaleY - offY;
-            DrawPlayerSprite(px, py, _player.Direction, _player.AnimFrame, spriteS);
+            float pcx = px + OverworldPlayer.Size * scaleX / 2f;
+            float pcy = py + OverworldPlayer.Size * scaleY / 2f;
+            DrawPlayerSprite(pcx, pcy, _player.Direction, _player.AnimFrame, spriteS, sprites);
 
             // Draw HUD overlay
             DrawHUD(window);
@@ -475,84 +477,52 @@ namespace MonsterTamer
             }
         }
 
-        private void DrawPlayerSprite(float x, float y, int dir, int frame, float scale = 1.0f)
+        // cx/cy are the screen-space centre of the player bounding box.
+        // SplashKit OptionScaleBmp scales from the bitmap centre, so we must
+        // pass drawX = cx - bmp.Width/2 to anchor correctly (same pattern as
+        // GameManager monster sprites).
+        private void DrawPlayerSprite(float cx, float cy, int dir, int frame, float spriteS, Dictionary<string, Bitmap> sprites)
         {
-            float os = OverworldPlayer.Size; // original size constant
-            float s  = os * scale;           // scaled size
-
-            // Body
-            SplashKit.FillRectangle(SplashKit.RGBColor(70, 130, 180),
-                x + 4*scale, y + 10*scale, (os-8)*scale, (os-10)*scale);
-
-            // Head
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 200, 150),
-                x + s/2, y + 8*scale, 8*scale);
-
-            // Hat
-            SplashKit.FillRectangle(SplashKit.RGBColor(34, 85, 34),
-                x + 3*scale, y + 2*scale, (os-6)*scale, 5*scale);
-            SplashKit.FillRectangle(SplashKit.RGBColor(34, 85, 34),
-                x + 6*scale, y - scale, (os-12)*scale, 5*scale);
-
-            // Legs — animated
-            if (frame == 0)
+            string key = dir switch
             {
-                SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + 5*scale, y + (os-8)*scale, 6*scale, 8*scale);
-                SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + (os-11)*scale, y + (os-6)*scale, 6*scale, 6*scale);
-            }
-            else
-            {
-                SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + 5*scale, y + (os-6)*scale, 6*scale, 6*scale);
-                SplashKit.FillRectangle(SplashKit.RGBColor(50, 50, 150),
-                    x + (os-11)*scale, y + (os-8)*scale, 6*scale, 8*scale);
-            }
+                1 => "trainer_back",
+                2 => "trainer_left",
+                3 => "trainer_right",
+                _ => "trainer"
+            };
 
-            // Eyes based on direction
-            if (dir == 0) // down
-            {
-                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 - 3*scale, y + 8*scale, 2*scale);
-                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 + 3*scale, y + 8*scale, 2*scale);
-            }
-            else if (dir == 1) // up — no eyes visible
-            {
-            }
-            else // left or right — one eye
-            {
-                SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2, y + 8*scale, 2*scale);
-            }
+            if (!sprites.TryGetValue(key, out Bitmap? bmp)) return;
+
+            float targetH  = TileSize * spriteS * 2.0f;
+            float bmpScale = targetH / bmp.Height;
+            float drawX    = cx - bmp.Width  / 2f;
+            float drawY    = cy - bmp.Height / 2f;
+            SplashKit.DrawBitmap(bmp, drawX, drawY, SplashKit.OptionScaleBmp(bmpScale, bmpScale));
         }
 
-        private void DrawTrainerNPC(float x, float y, string label, float scale = 1.0f)
+        // cx/cy are the screen-space centre of the NPC tile.
+        // Same centre-based rendering contract as DrawPlayerSprite.
+        private void DrawTrainerNPC(float cx, float cy, string label, float spriteS, Dictionary<string, Bitmap> sprites)
         {
-            float os = OverworldPlayer.Size;
-            float s  = os * scale;
+            string key = label.ToLower().Replace(" ", "_");
 
-            // Body
-            SplashKit.FillRectangle(SplashKit.RGBColor(180, 60, 60),
-                x + 4*scale, y + 10*scale, (os-8)*scale, (os-10)*scale);
+            float targetH = TileSize * spriteS * 2.0f;
 
-            // Head
-            SplashKit.FillCircle(SplashKit.RGBColor(255, 200, 150),
-                x + s/2, y + 8*scale, 8*scale);
+            if (sprites.TryGetValue(key, out Bitmap? bmp))
+            {
+                float bmpScale = targetH / bmp.Height;
+                float drawX    = cx - bmp.Width  / 2f;
+                float drawY    = cy - bmp.Height / 2f;
+                SplashKit.DrawBitmap(bmp, drawX, drawY, SplashKit.OptionScaleBmp(bmpScale, bmpScale));
+            }
 
-            // Hat
-            SplashKit.FillRectangle(SplashKit.RGBColor(120, 30, 30),
-                x + 3*scale, y + 2*scale, (os-6)*scale, 5*scale);
-
-            // Eyes
-            SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 - 3*scale, y + 8*scale, 2*scale);
-            SplashKit.FillCircle(SplashKit.ColorBlack(), x + s/2 + 3*scale, y + 8*scale, 2*scale);
-
-            // Exclamation mark above
-            SplashKit.DrawText("!", SplashKit.RGBColor(255, 215, 0), "Arial", 14,
-                x + s/2 - 3*scale, y - 16*scale);
-
-            // Name label
-            SplashKit.DrawText(label, SplashKit.RGBColor(255, 255, 255), "Arial", 9,
-                x - 10, y - 28*scale);
+            float spriteTop = cy - targetH / 2f;
+            float bangY     = spriteTop - 20f;
+            float labelY    = bangY - 14f;
+            float bangX     = cx - SplashKit.TextWidth("!", "Arial", 14) / 2f;
+            float labelX    = cx - SplashKit.TextWidth(label, "Arial", 9) / 2f;
+            SplashKit.DrawText("!", SplashKit.RGBColor(255, 215, 0), "Arial", 14, bangX, bangY);
+            SplashKit.DrawText(label, SplashKit.RGBColor(255, 255, 255), "Arial", 9, labelX, labelY);
         }
 
         private void DrawHUD(Window window)

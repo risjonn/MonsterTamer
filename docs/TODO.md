@@ -1,10 +1,17 @@
 # TODO tasks
 
-### 5.13 Trainer & Region Boss Polish Improvements
-
-- [ ] Replace manually drawn overworld visuals with sprite-based rendering
-  - Change "Trainer Siti" name to "Trainer Lili"
-  - Replace trainer rendering (currently SplashKit drawn shapes) with PNG sprite
-  - Replace boss/region visual elements with PNG sprite assets
-  - Ensure sprites follow same positioning logic as current rendering
-  - Maintain existing collision / interaction logic (visual change only)
+### 5.14 Battle Bag UI Improvements
+- [ ] Standardize bag item slot dimensions and spacing to match the move panel layout
+- [ ] Ensure bag control hints remain fully visible and never overlap item slots
+- [ ] Add inventory scrolling support:
+  - Display up to 4 item slots at a time
+  - Allow selection of items beyond the visible range
+  - Automatically scroll the visible item window as selection moves
+- [ ] Add scroll indicators:
+  - Show an upward indicator when items exist above the current visible range
+  - Show a downward indicator when items exist below the current visible range
+- Requirements:
+  - Preserve existing bag functionality and item usage logic
+  - Preserve existing battle panel layout
+  - Ensure the selected item is always visible on screen
+  - Support inventories larger than 4 items
