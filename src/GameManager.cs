@@ -42,6 +42,10 @@ namespace MonsterTamer
         private bool _pendingEnemyTurn = false;
         private int  _interTurnDelay   = 0;
 
+        // Capture-end pacing — delays EndBattle after a successful catch so the animation plays
+        private bool _pendingCaptureEnd = false;
+        private int  _captureEndTimer   = 0;
+
         // Screen resolution constants — reference everywhere instead of hardcoded 800/600
         private const int ScreenW = 1280;
         private const int ScreenH = 720;
@@ -161,7 +165,7 @@ namespace MonsterTamer
             {
                 if (_state == GameState.Battle)
                 {
-                    if (_pendingBattleEnd) return;
+                    if (_pendingBattleEnd || _pendingCaptureEnd) return;
                     // Close sub-menus first; a clean Esc flees
                     if (_showingItemMenu || _showingSwapMenu)
                     {
@@ -259,7 +263,8 @@ namespace MonsterTamer
                 return;
             }
 
-            if (_pendingEnemyTurn) return;
+            if (_pendingCaptureEnd) return;
+            if (_pendingEnemyTurn)  return;
 
             if (_showingSwapMenu)
             {
@@ -333,6 +338,8 @@ namespace MonsterTamer
                 if (item is CaptureOrb orb)
                 {
                     CaptureResult result = _battleManager.AttemptCapture(orb);
+                    _battleAnimations.Add(new CaptureOrbAnimation(272f, 312f, 845f, 168f, result));
+
                     if (result == CaptureResult.Caught)
                     {
                         TamedMonster tamed = MonsterFactory.Tame(_battleManager.WildTarget!);
@@ -340,7 +347,8 @@ namespace MonsterTamer
                             _battleManager.AddLog($"{tamed.Name} joined your party!");
                         else
                             _battleManager.AddLog($"{tamed.Name} was released — party is full!");
-                        EndBattle();
+                        _pendingCaptureEnd = true;
+                        _captureEndTimer   = 140;
                         return;
                     }
                 }
@@ -350,8 +358,16 @@ namespace MonsterTamer
                     TamedMonster? active = _player.GetActiveMonster();
                     if (active != null)
                     {
+                        int hpBefore = active.Hp;
                         item.Use(active);
+                        int healed = active.Hp - hpBefore;
                         _battleManager.AddLog($"Used {item.Name} on {active.Name}!");
+
+                        if (healed > 0)
+                        {
+                            _battleAnimations.Add(new PotionGlowAnimation(272f, 312f));
+                            _battleAnimations.Add(new HealNumberAnimation(272f, 282f, healed));
+                        }
                     }
                 }
 
@@ -456,6 +472,16 @@ namespace MonsterTamer
                     if (_battleResultTimer <= 0)
                     {
                         _pendingBattleEnd = false;
+                        EndBattle();
+                    }
+                }
+
+                if (_pendingCaptureEnd)
+                {
+                    _captureEndTimer--;
+                    if (_captureEndTimer <= 0)
+                    {
+                        _pendingCaptureEnd = false;
                         EndBattle();
                     }
                 }
@@ -615,6 +641,8 @@ namespace MonsterTamer
             _battleAnimations.Clear();
             _pendingEnemyTurn    = false;
             _interTurnDelay      = 0;
+            _pendingCaptureEnd   = false;
+            _captureEndTimer     = 0;
         }
 
         // Fired by BattleManager.AttackHit — creates a hit flash + floating damage number

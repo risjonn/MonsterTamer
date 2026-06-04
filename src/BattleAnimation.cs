@@ -210,6 +210,88 @@ namespace MonsterTamer
         }
     }
 
+    // Multi-phase capture orb: travels from player to enemy, expands on contact, then shows result.
+    // Phase 1 (0-40):  orb travels with an upward arc.
+    // Phase 2 (41-65): orb expands as a blue flash on contact.
+    // Phase 3 (66-130): "Caught!" (gold) for Caught; "Escaped!" (red) for Escaped or Failed.
+    public class CaptureOrbAnimation : BattleAnimation
+    {
+        private readonly float         _sx, _sy, _tx, _ty;
+        private readonly CaptureResult _result;
+
+        private const int TravelEnd = 40;
+        private const int ExpandEnd = 65;
+
+        public CaptureOrbAnimation(float sx, float sy, float tx, float ty, CaptureResult result)
+            : base(130)
+        {
+            _sx = sx; _sy = sy;
+            _tx = tx; _ty = ty;
+            _result = result;
+        }
+
+        public override void Draw()
+        {
+            if (_frame <= TravelEnd)
+            {
+                float t   = (float)_frame / TravelEnd;
+                float cx  = _sx + (_tx - _sx) * t;
+                float arc = (float)(Math.Sin(t * Math.PI) * -50.0);
+                float cy  = _sy + (_ty - _sy) * t + arc;
+                SplashKit.FillCircle(SplashKit.RGBAColor(100, 140, 255, 80), cx, cy, 18f);
+                SplashKit.FillCircle(SplashKit.RGBColor(50, 80, 210), cx, cy, 13f);
+                SplashKit.FillCircle(SplashKit.RGBAColor(220, 235, 255, 150), cx - 4f, cy - 4f, 5f);
+            }
+            else if (_frame <= ExpandEnd)
+            {
+                float t      = (float)(_frame - TravelEnd) / (ExpandEnd - TravelEnd);
+                float radius = 13f + t * 60f;
+                int   alpha  = (int)((1f - t) * 200);
+                SplashKit.FillCircle(SplashKit.RGBAColor(100, 150, 255, alpha), _tx, _ty, radius);
+            }
+            else
+            {
+                float t       = (float)(_frame - ExpandEnd) / (_duration - ExpandEnd);
+                float fadeIn  = Math.Min(1f, t / 0.12f);
+                float fadeOut = t > 0.75f ? (1f - t) / 0.25f : 1f;
+                int   alpha   = (int)(Math.Min(fadeIn, fadeOut) * 255f);
+                float y       = _ty - 55f - t * 40f;
+
+                string text  = _result == CaptureResult.Caught ? "Caught!" : "Escaped!";
+                Color  color = _result == CaptureResult.Caught
+                    ? SplashKit.RGBAColor(255, 215,  0, alpha)
+                    : SplashKit.RGBAColor(255,  70, 70, alpha);
+
+                int tw = SplashKit.TextWidth(text, "Arial", 28);
+                SplashKit.DrawText(text, color, "Arial", 28, (int)(_tx - tw / 2f), (int)y);
+            }
+        }
+    }
+
+    // Sustained pulsing green glow for potion use — two concentric circles animated with a sine wave.
+    // Pair with HealNumberAnimation for the floating "+X HP" text.
+    public class PotionGlowAnimation : BattleAnimation
+    {
+        private float _cx, _cy;
+
+        public PotionGlowAnimation(float cx, float cy) : base(75)
+        {
+            _cx = cx;
+            _cy = cy;
+        }
+
+        public override void Draw()
+        {
+            float t      = (float)_frame / _duration;
+            float pulse  = (float)(Math.Sin(_frame * 0.22) * 0.4 + 0.6);
+            float fade   = 1f - t;
+            int   outerA = (int)(pulse * 110 * fade);
+            int   innerA = (int)(pulse * 170 * fade);
+            SplashKit.FillCircle(SplashKit.RGBAColor(40, 180, 60, outerA), _cx, _cy, 86f);
+            SplashKit.FillCircle(SplashKit.RGBAColor(60, 220, 80, innerA), _cx, _cy, 68f);
+        }
+    }
+
     // Brief status-coloured flash + rising "SKIPPED!" text for frozen / paralysed turn skips.
     public class TurnSkipAnimation : BattleAnimation
     {

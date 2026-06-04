@@ -1,23 +1,6 @@
 # TODO tasks
 
 
-### 5.7c Capture & item animations
-- [ ] Capture orb animation:
-  - Orb travels from player side toward enemy
-  - Orb expands on contact
-  - Show result:
-    - "Caught!" in gold
-    - "Escaped!" in red
-- [ ] Potion animation: 
-  - Green glow around target monster
-  - Floating "+X HP" text
-- [ ] Reuse animation framework from Priority 5.7a
-- [ ] All animations must:
-  - Be non-blocking
-  - Use frame counters only
-  - Work correctly with existing battle flow
-
-
 ### 5.8 Battle log improvements
 
 - [ ] Colour-code battle log entries:
