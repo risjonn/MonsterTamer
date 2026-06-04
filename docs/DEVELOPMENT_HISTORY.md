@@ -381,6 +381,23 @@ Goal:
 - [x] Most recent entry should be at the bottom and most visually prominent (full opacity), older entries fade
 
 
+### 5.10 Battle screen tips and info
+
+- [x] Add a small "Tips" panel or info line below the move panel showing:
+  - Type effectiveness hint:
+    - Example: "Flying is super effective against Grass!" based on current enemy type vs selected move type
+  - Capture hint (only if player has a Capture Orb):
+    - Show estimated capture chance based on current battle state
+    - Example:
+      - "Capture Chance: Very Low"
+      - "Capture Chance: Low"
+      - "Capture Chance: Moderate"
+      - "Capture Chance: High"
+      - "Capture Chance: Very High"
+  - Capture chance should update dynamically as enemy HP changes
+- [x] Highlight the currently selected move's type badge more prominently when it would be super effective against the enemy
+
+
 ## Priority 6 — Report & Final Submission (do in main chat, not Claude Code)
 
 ### 6.1 Class diagram updates (address lecturer feedback)

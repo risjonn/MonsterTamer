@@ -1,23 +1,6 @@
 # TODO tasks
 
 
-### 5.10 Battle screen tips and info
-
-- [ ] Add a small "Tips" panel or info line below the move panel showing:
-  - Type effectiveness hint:
-    - Example: "Flying is super effective against Grass!" based on current enemy type vs selected move type
-  - Capture hint (only if player has a Capture Orb):
-    - Show estimated capture chance based on current battle state
-    - Example:
-      - "Capture Chance: Very Low"
-      - "Capture Chance: Low"
-      - "Capture Chance: Moderate"
-      - "Capture Chance: High"
-      - "Capture Chance: Very High"
-  - Capture chance should update dynamically as enemy HP changes
-- [ ] Highlight the currently selected move's type badge more prominently when it would be super effective against the enemy
-
-
 ### 5.11 Item replenishment / shop system (Optional enhancement)
 
 - [ ] Add a `ShopState` (`GameState.Shop`) accessible from the overworld (e.g. press B for bag/shop, or place a shop tile on the map near the region start)

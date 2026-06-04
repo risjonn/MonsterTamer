@@ -1122,7 +1122,11 @@ namespace MonsterTamer
             // Battle log first so info panels render on top of it
             DrawBattleLog();
 
-            // Move / item / swap panel
+            // Dedicated tips strip above the panels (y=430–452) — always visible in battle
+            if (playerMon != null && enemyMon != null)
+                DrawBattleTips(playerMon, enemyMon);
+
+            // Move / item / swap panel (y=452+)
             if (playerMon != null)
             {
                 if (_showingSwapMenu)
@@ -1130,7 +1134,7 @@ namespace MonsterTamer
                 else if (_showingItemMenu)
                     DrawItemPanel();
                 else
-                    DrawMovePanel(playerMon);
+                    DrawMovePanel(playerMon, enemyMon);
             }
 
             // Enemy info panel — top left (drawn after log so it's on top)
@@ -1323,32 +1327,45 @@ namespace MonsterTamer
             _                    => SplashKit.RGBColor(160, 155, 140),
         };
 
-        private void DrawMovePanel(TamedMonster player)
+        private void DrawMovePanel(TamedMonster player, Monster? enemy)
         {
-            // Panel: left half of bottom UI strip  (x=16, y=430 to x=572, y=708)
-            SplashKit.FillRectangle(SplashKit.RGBAColor(20, 35, 15, 230), 16, 430, 556, 278);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80),       16, 430, 556, 278);
+            // Panel: left half of bottom UI strip (x=16, y=452 to y=720)
+            // Tips strip occupies y=430–452 above this panel
+            SplashKit.FillRectangle(SplashKit.RGBAColor(20, 35, 15, 230), 16, 452, 556, 268);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(80, 180, 80),       16, 452, 556, 268);
             SplashKit.DrawText("Choose a move:",
-                SplashKit.RGBColor(180, 220, 180), "Arial", 11, 26, 440);
+                SplashKit.RGBColor(180, 220, 180), "Arial", 11, 26, 462);
 
             for (int i = 0; i < player.MoveSet.Length; i++)
             {
                 int col = i % 2, row = i / 2;
-                // 2-column grid: box w=260, h=110; column gap 12px; row gap 14px
+                // 2-column grid: box w=260, h=90; column gap 12px; row step 102px
                 int bx  = 26  + col * 272;
-                int by  = 456 + row * 126;
+                int by  = 478 + row * 102;
                 bool sel = (i == _player.SelectedMoveIndex);
 
+                Move move = player.MoveSet[i];
+                bool superEff = enemy != null
+                    && move.GetMoveCategory() == "Attack"
+                    && IsSuperEffective(move.MoveType, enemy);
+
+                // Box fill — brighter when selected + super effective
                 SplashKit.FillRectangle(
-                    sel ? SplashKit.RGBColor(50, 100, 40)
-                        : SplashKit.RGBColor(25, 55, 20),
-                    bx, by, 260, 110);
+                    sel && superEff ? SplashKit.RGBColor(60, 120, 40)
+                    : sel           ? SplashKit.RGBColor(50, 100, 40)
+                                    : SplashKit.RGBColor(25,  55, 20),
+                    bx, by, 260, 90);
+
+                // Outer border — gold when selected
                 SplashKit.DrawRectangle(
                     sel ? SplashKit.RGBColor(255, 215, 0)
                         : SplashKit.RGBColor(80, 160, 60),
-                    bx, by, 260, 110);
+                    bx, by, 260, 90);
 
-                Move move = player.MoveSet[i];
+                // Inner border — bright yellow inset when selected AND super effective
+                if (sel && superEff)
+                    SplashKit.DrawRectangle(SplashKit.RGBColor(255, 255, 100), bx + 3, by + 3, 254, 84);
+
                 Color nameCol = sel ? SplashKit.RGBColor(255, 215, 0) : SplashKit.ColorWhite();
 
                 // Truncate name to fit inside box
@@ -1356,11 +1373,19 @@ namespace MonsterTamer
                 int nameLimit = move.Power > 0 ? 170 : 235;
                 while (moveName.Length > 3 && SplashKit.TextWidth(moveName, "Arial", 14) > nameLimit)
                     moveName = moveName.Substring(0, moveName.Length - 4) + "...";
-                SplashKit.DrawText(moveName, nameCol, "Arial", 14, bx + 10, by + 12);
+                SplashKit.DrawText(moveName, nameCol, "Arial", 14, bx + 10, by + 10);
 
                 SplashKit.DrawText(move.GetMoveCategory(),
-                    SplashKit.RGBColor(160, 200, 160), "Arial", 11, bx + 10, by + 34);
-                DrawTypeBadge(move.MoveType, bx + 10, by + 58);
+                    SplashKit.RGBColor(160, 200, 160), "Arial", 11, bx + 10, by + 30);
+
+                // Type badge — gold outline when selected and super effective
+                int badgeX = bx + 10, badgeY = by + 52;
+                if (sel && superEff)
+                {
+                    int bw = TypeBadgeWidth(move.MoveType);
+                    SplashKit.DrawRectangle(SplashKit.RGBColor(255, 240, 80), badgeX - 2, badgeY - 2, bw + 4, 20);
+                }
+                DrawTypeBadge(move.MoveType, badgeX, badgeY);
 
                 // Right-align PWR with 10px right margin
                 if (move.Power > 0)
@@ -1368,15 +1393,90 @@ namespace MonsterTamer
                     string pwrText = $"PWR {move.Power}";
                     int pwrW = SplashKit.TextWidth(pwrText, "Arial", 10);
                     SplashKit.DrawText(pwrText,
-                        SplashKit.RGBColor(140, 180, 140), "Arial", 10, bx + 250 - pwrW, by + 62);
+                        SplashKit.RGBColor(140, 180, 140), "Arial", 10, bx + 250 - pwrW, by + 56);
                 }
             }
 
             // Separator lines between move boxes
             if (player.MoveSet.Length > 1)
-                SplashKit.DrawLine(SplashKit.RGBColor(50, 100, 40), 292, 456, 292, 692);
+                SplashKit.DrawLine(SplashKit.RGBColor(50, 100, 40), 292, 478, 292, 670);
             if (player.MoveSet.Length > 2)
                 SplashKit.DrawLine(SplashKit.RGBColor(50, 100, 40), 26, 574, 558, 574);
+        }
+
+        private static bool IsSuperEffective(MonsterType moveType, Monster defender)
+        {
+            float mult = TypeChart.GetMultiplier(moveType, defender.PrimaryType);
+            if (defender.HasDualType)
+                mult *= TypeChart.GetMultiplier(moveType, defender.SecondaryType);
+            return mult >= 2.0f;
+        }
+
+        private static string GetTypeEffectivenessHint(Move move, Monster enemy)
+        {
+            float p = TypeChart.GetMultiplier(move.MoveType, enemy.PrimaryType);
+            float s = enemy.HasDualType ? TypeChart.GetMultiplier(move.MoveType, enemy.SecondaryType) : 1.0f;
+            float combined = p * s;
+
+            if (combined >= 2.0f)
+            {
+                MonsterType weakType = p >= 2.0f ? enemy.PrimaryType : enemy.SecondaryType;
+                return $"{move.MoveType} is super effective against {weakType}!";
+            }
+            if (combined <= 0.5f && combined > 0.0f)
+            {
+                MonsterType resistType = p <= 0.5f ? enemy.PrimaryType : enemy.SecondaryType;
+                return $"{move.MoveType} is not very effective against {resistType}...";
+            }
+            return "";
+        }
+
+        private void DrawBattleTips(TamedMonster player, Monster enemy)
+        {
+            // Dedicated HUD strip between scene and bottom panels (y=430–452)
+            // Not overlapping any panel; spans the full width of both panel areas
+            SplashKit.FillRectangle(SplashKit.RGBAColor(8, 16, 6, 210), 16, 430, 1248, 22);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(45, 80, 45),      16, 430, 1248, 22);
+            SplashKit.DrawText("Tips:", SplashKit.RGBColor(75, 115, 75), "Arial", 10, 24, 433);
+
+            // Type effectiveness — Attack moves only
+            Move selectedMove = player.MoveSet[_player.SelectedMoveIndex];
+            if (selectedMove.GetMoveCategory() == "Attack")
+            {
+                string typeHint = GetTypeEffectivenessHint(selectedMove, enemy);
+                if (typeHint.Length > 0)
+                {
+                    bool superEff = typeHint.Contains("super effective");
+                    Color hintColor = superEff
+                        ? SplashKit.RGBColor(100, 240, 100)
+                        : SplashKit.RGBColor(220, 130,  60);
+                    SplashKit.DrawText(typeHint, hintColor, "Arial", 10, 66, 433);
+                }
+            }
+
+            // Capture chance — only for wild battles when player has a Capture Orb
+            WildMonster? wild = _battleManager?.WildTarget;
+            if (wild != null)
+            {
+                CaptureOrb? orb = _player.Bag.GetAllItems().OfType<CaptureOrb>().FirstOrDefault();
+                if (orb != null)
+                {
+                    float chance = orb.ComputeCatchChance(wild);
+                    string label = chance < 0.10f ? "Very Low"
+                                 : chance < 0.20f ? "Low"
+                                 : chance < 0.35f ? "Moderate"
+                                 : chance < 0.50f ? "High"
+                                 : "Very High";
+                    Color captureColor = chance < 0.10f ? SplashKit.RGBColor(200,  80,  80)
+                                       : chance < 0.20f ? SplashKit.RGBColor(220, 140,  60)
+                                       : chance < 0.35f ? SplashKit.RGBColor(220, 200,  60)
+                                       : chance < 0.50f ? SplashKit.RGBColor(100, 200, 100)
+                                       :                  SplashKit.RGBColor( 60, 220, 120);
+                    string captureText = $"Capture Chance: {label}";
+                    int ctw = SplashKit.TextWidth(captureText, "Arial", 10);
+                    SplashKit.DrawText(captureText, captureColor, "Arial", 10, 1264 - ctw - 8, 433);
+                }
+            }
         }
 
         private void DrawItemPanel()
@@ -1386,17 +1486,17 @@ namespace MonsterTamer
                 .Where(i => isWild || !(i is CaptureOrb))
                 .ToList();
 
-            SplashKit.FillRectangle(SplashKit.RGBAColor(15, 28, 50, 230), 16, 430, 556, 278);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 220),      16, 430, 556, 278);
+            SplashKit.FillRectangle(SplashKit.RGBAColor(15, 28, 50, 230), 16, 452, 556, 268);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 220),      16, 452, 556, 268);
             SplashKit.DrawText("Bag:",
-                SplashKit.RGBColor(140, 200, 255), "Arial", 11, 26, 440);
+                SplashKit.RGBColor(140, 200, 255), "Arial", 11, 26, 462);
             SplashKit.DrawText("[C] Back",
-                SplashKit.RGBColor(100, 140, 180), "Arial", 10, 508, 440);
+                SplashKit.RGBColor(100, 140, 180), "Arial", 10, 508, 462);
 
             if (items.Count == 0)
             {
                 SplashKit.DrawText("Bag is empty.",
-                    SplashKit.RGBColor(200, 140, 80), "Arial", 13, 220, 560);
+                    SplashKit.RGBColor(200, 140, 80), "Arial", 13, 220, 582);
                 return;
             }
 
@@ -1405,7 +1505,7 @@ namespace MonsterTamer
                 bool sel = (i == _selectedItemIndex);
                 int  col = i % 2, row = i / 2;
                 int  bx  = 26  + col * 272;
-                int  by  = 456 + row * 124;
+                int  by  = 478 + row * 124;
 
                 SplashKit.FillRectangle(
                     sel ? SplashKit.RGBColor(25, 58, 110)
@@ -1429,19 +1529,19 @@ namespace MonsterTamer
 
             if (items.Count > 4)
                 SplashKit.DrawText($"... and {items.Count - 4} more",
-                    SplashKit.RGBColor(100, 140, 180), "Arial", 10, 26, 692);
+                    SplashKit.RGBColor(100, 140, 180), "Arial", 10, 26, 714);
         }
 
         private void DrawSwapPanel()
         {
             TamedMonster? active = _player.GetActiveMonster();
 
-            SplashKit.FillRectangle(SplashKit.RGBAColor(30, 15, 50, 230), 16, 430, 556, 278);
-            SplashKit.DrawRectangle(SplashKit.RGBColor(160, 80, 220),      16, 430, 556, 278);
+            SplashKit.FillRectangle(SplashKit.RGBAColor(30, 15, 50, 230), 16, 452, 556, 268);
+            SplashKit.DrawRectangle(SplashKit.RGBColor(160, 80, 220),      16, 452, 556, 268);
             SplashKit.DrawText("Party — Send out:",
-                SplashKit.RGBColor(210, 160, 255), "Arial", 11, 26, 440);
+                SplashKit.RGBColor(210, 160, 255), "Arial", 11, 26, 462);
             SplashKit.DrawText("[X] Back",
-                SplashKit.RGBColor(140, 100, 180), "Arial", 10, 508, 440);
+                SplashKit.RGBColor(140, 100, 180), "Arial", 10, 508, 462);
 
             for (int i = 0; i < Math.Min(_player.Party.Count, 6); i++)
             {
@@ -1451,7 +1551,7 @@ namespace MonsterTamer
                 bool         isDead = !m.IsAlive;
                 int          col    = i % 2, row = i / 2;
                 int          bx     = 26  + col * 272;
-                int          by     = 456 + row * 78;
+                int          by     = 478 + row * 78;
 
                 Color bg  = isDead  ? SplashKit.RGBColor(40, 15, 40)
                           : isCurr  ? SplashKit.RGBColor(50, 25, 80)
@@ -1478,7 +1578,7 @@ namespace MonsterTamer
         private void DrawBattleLog()
         {
             if (_battleManager == null) return;
-            int logX = 590, logY = 430, logW = ScreenW - 606, logH = 278;
+            int logX = 590, logY = 452, logW = ScreenW - 606, logH = 268;
             SplashKit.FillRectangle(SplashKit.RGBAColor(10, 20, 8, 230), logX, logY, logW, logH);
             SplashKit.DrawRectangle(SplashKit.RGBColor(60, 140, 60),      logX, logY, logW, logH);
             SplashKit.DrawText("Battle Log",
