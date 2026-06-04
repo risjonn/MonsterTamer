@@ -52,6 +52,10 @@ namespace MonsterTamer
         // Active battle animations — updated and drawn each frame, pruned when complete
         private List<BattleAnimation> _battleAnimations = new();
 
+        // Wrapped battle-log cache — rebuilt only when BattleLog.Count changes
+        private List<(string text, LogEntryType type)> _wrappedLogCache = new();
+        private int                                     _wrappedLogCount = -1;
+
         // BGM — loaded once, swapped on state transitions
         private Music? _overworldMusic = null;
         private Music? _battleMusic    = null;
@@ -1819,10 +1823,15 @@ namespace MonsterTamer
 
             List<LogEntry> log = _battleManager.BattleLog;
             int wrapW = logW - 22;
-            var wrapped = new List<(string text, LogEntryType type)>();
-            foreach (LogEntry entry in log)
-                foreach (string line in WrapText(entry.Text, "Arial", 10, wrapW))
-                    wrapped.Add((line, entry.Type));
+            if (log.Count != _wrappedLogCount)
+            {
+                _wrappedLogCache.Clear();
+                foreach (LogEntry entry in log)
+                    foreach (string line in WrapText(entry.Text, "Arial", 10, wrapW))
+                        _wrappedLogCache.Add((line, entry.Type));
+                _wrappedLogCount = log.Count;
+            }
+            var wrapped = _wrappedLogCache;
 
             int maxLines = 9;
             int wStart   = Math.Max(0, wrapped.Count - maxLines);
